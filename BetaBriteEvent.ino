@@ -21,11 +21,12 @@
 
 
   History
-    V1.0 (18/07/2022)
-    - build from BetaPorte V2.1.0 (13/08/2022)
-
-  port
-
+    V1.0 (18/08/2022)
+    - build from BetaPorte V2.1.0 (13/08/2022) et checkMyBox V1.2
+    V1.1 (22/08/2022)
+    - refonte du protocole betaDomo (ajout json)
+    - ajout surveillance du wifi  acces web  et acces intanet
+    - correction pour avoir la timeZone automatiquement
 
 *************************************************/
 
@@ -33,7 +34,7 @@
 #include "ESP8266.h"
 static_assert(sizeof(time_t) == 8, "This version works with time_t 64bit  move to ESP8266 kernel 3.0 or more");
 
-#define APP_NAME "BetaBriteEvent V1.0"
+#define APP_NAME "BetaBriteEvent V1.1"
 
 
 //
@@ -58,12 +59,19 @@ enum tUserEventCode {
   // evenement utilisateurs
   evBP0 = 100,      // low = low power allowed
   evLed0,
-  evLowPower,
   evUDPEvent,         // Trame UDP avec un evenement
+  evCheckWWW,
+  evCheckAPI,
+  evNewStatus,
+
   // evenement action
   doReset,
 };
 
+#define checkWWW_DELAY  (60 * 60 * 1000L)  // toute les heures
+#define checkAPI_DELAY   (5 * 60 * 1000L)  // toute les 5 minutes
+
+#define HTTP_API  "http://nimux.frdev.com/net234/api.php"  // URI du serveur api local
 
 
 // instance betaEvent
@@ -85,13 +93,8 @@ enum tUserEventCode {
 
 //WiFI
 #include <ESP8266WiFi.h>
-#include <ESP8266HTTPClient.h>
+#include <ESP8266HTTPClient.h>  // acces web API
 #include <Arduino_JSON.h>
-
-bool sleepOk = true;
-int  multi = 0; // nombre de clic rapide
-
-// gestion de l'ecran
 
 
 // rtc memory to keep date
@@ -106,13 +109,21 @@ struct  {
 
 
 // Variable d'application locale
+String   nodeName = "NODE_NAME";    // nom de  la device (a configurer avec NODE=)"
 bool     WiFiConnected = false;
 
 time_t   currentTime;
 int8_t   timeZone = -2;          //les heures sont toutes en localtimes
 bool     configOk = true; // global used by getConfig...
-String   messageUUID;
-String   message;
+
+String   messageUDP;  //trame UDP
+//String   message;
+
+bool     WWWOk = false;
+bool     APIOk = false;
+//int      currentMonth = -1;
+bool sleepOk = true;
+
 
 #include <WiFiUdp.h>
 // port d'ecoute UDP
@@ -124,7 +135,7 @@ WiFiUDP MyUDP;
 void setup() {
   enableWiFiAtBootTime();   // obligatoire pour lekernel ESP > 3.0
   Serial.begin(115200);
-  Serial1.begin(2400, SERIAL_7E1);
+  Serial1.begin(2400, SERIAL_7E1);  // afficheur betabrite sur serial1 TX (D4)
   Serial.println(F("\r\n\n" APP_NAME));
 
   // Start instance
@@ -138,10 +149,10 @@ void setup() {
     //WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   }
 
-  message.reserve(200);
-  messageUUID.reserve(16);
+  //  message.reserve(200);
+  //  messageUDP.reserve(16);
 
-  Serial.println(F("Bonjour ...."));
+  //  Serial.println(F("Bonjour ...."));
 
 
   // System de fichier
@@ -159,6 +170,13 @@ void setup() {
   adjustTime(savedRTCmemory.actualTimestamp);
   currentTime = savedRTCmemory.actualTimestamp;
 
+  // recuperation de la config dans config.json
+  nodeName = jobGetConfigStr(F("nodename"));
+  if (nodeName == "") {
+    Serial.println(F("!!! Configurer le nom de la device avec 'NODE=nodename' !!!"));
+    //   configErr = true;
+  }
+  D_println(nodeName);
 
   // recuperation de la timezone dans la config
   timeZone = jobGetConfigInt(F("timezone"));
@@ -167,13 +185,14 @@ void setup() {
     jobSetConfigInt(F("timezone"), timeZone);
     Serial.println(F("!!! timezone !!!"));
   }
-    timeZone = -2; // par defaut France hivers
   D_println(timeZone);
 
-  message = F("Bonjour ...   ");
+  String message = F("Bonjour ...   ");
   message += niceDisplayTime(currentTime, true);
   betaBriteWrite(message);
 
+  Serial.println("Bonjour ....");
+  Serial.println("Tapez '?' pour avoir la liste des commandes");
 
   D_println(Events.freeRam());
 }
@@ -195,16 +214,13 @@ void loop() {
       break;
 
 
-    case ev24H:
-      Serial.println("---- 24H ---");
-      break;
-
-
-    case ev10Hz: {
-
-
+    case ev24H: {
+        String newDateTime = niceDisplayTime(currentTime, true);
+        D_println(newDateTime);
       }
       break;
+
+
 
     case ev1Hz: {
 
@@ -232,10 +248,17 @@ void loop() {
               // lisen UDP 23423
               Serial.println("Listen broadcast");
               MyUDP.begin(localUdpPort);
-              message = F("Wifi ok   ");
+              Events.delayedPush(checkWWW_DELAY, evCheckWWW); // will send mail
+              Events.delayedPush(checkAPI_DELAY, evCheckAPI);
+              String message = F("Wifi ok   ");
               message += niceDisplayTime(currentTime, true);
               betaBriteWrite(message);
+            } else {
+              WWWOk = false;
+              String message = F("Wifi hors service   ");
+              betaBriteWrite(message);
             }
+
             D_println(WiFiConnected);
           }
         }
@@ -248,10 +271,10 @@ void loop() {
         if (lastMinute != minute()) {
           lastMinute = minute();
 
-         
-             
+
+
           String aMessage = niceDisplayTime(currentTime, true);
-          aMessage = aMessage.substring(0,aMessage.length()-3);
+          aMessage = aMessage.substring(0, aMessage.length() - 3);
           betaBriteWrite(aMessage);
           jobBroadcastMessage("");
         }
@@ -269,12 +292,61 @@ void loop() {
       break;
 
 
-    // Arrivee d'un badge via trame distante (UUID dans messageUUID)
+
+   case evCheckWWW:
+      Serial.println("evCheckWWW");
+      if (WiFiConnected) {
+        if (WWWOk != (getWebTime() > 0)) {
+          WWWOk = !WWWOk;
+          D_println(WWWOk);
+          Events.delayedPush(1000,evNewStatus);
+         }
+        Events.delayedPush(checkWWW_DELAY, evCheckWWW);
+      }
+      break;
+
+    case evCheckAPI: {
+        Serial.println("evCheckAPI");
+        if (WiFiConnected) {
+          JSONVar jsonData;
+          jsonData["timeZone"] = timeZone;
+          jsonData["timestamp"] = (double)currentTime;
+ //         jsonData["sonde1"] = sonde1;
+ //         jsonData["sonde2"] = sonde2;
+          String jsonStr = JSON.stringify(jsonData);
+          if ( APIOk != dialWithPHP(nodeName, "timezone", jsonStr) ) {
+            APIOk = !APIOk;
+            D_println(APIOk);
+            Events.delayedPush(1000,evNewStatus);
+ //           writeHisto( APIOk ? F("API Ok") : F("API Err"), "magnus2.frdev" );
+          }
+          if (APIOk) {
+            jsonData = JSON.parse(jsonStr);
+            time_t aTimeZone = (const double)jsonData["timezone"];
+            D_println(aTimeZone);
+            if (aTimeZone != timeZone) {
+ //             writeHisto( F("Old TimeZone"), String(timeZone) );
+              timeZone = aTimeZone;
+              jobSetConfigInt("timezone", timeZone);
+              // force recalculation of time
+              setSyncProvider(getWebTime);
+              currentTime = now();
+  //            writeHisto( F("New TimeZone"), String(timeZone) );
+            }
+          }
+        }
+        Events.delayedPush(checkAPI_DELAY, evCheckAPI);
+      }
+      break;
+
+
+
+
+    // Arrivee d'un badge via trame distante (info dans messageUDP)
     case evUDPEvent: {
 
-        D_println(messageUUID);
-        message = "event ";
-        message += messageUUID;
+        D_println(messageUDP);
+        String message = messageUDP;
         message += "          ";
 
         betaBriteWrite(message);
@@ -318,6 +390,22 @@ void loop() {
     case evInString:
       if (Debug.trackTime < 2) {
         D_println(Keyboard.inputString);
+      }
+
+      if (Keyboard.inputString.startsWith(F("NODE="))) {
+        Serial.println(F("SETUP NODENAME : 'NODE=nodename'  ( this will reset)"));
+        String aStr = Keyboard.inputString;
+        grabFromStringUntil(aStr, '=');
+        aStr.replace(" ", "_");
+        aStr.trim();
+
+        if (aStr != "") {
+          nodeName = aStr;
+          D_println(nodeName);
+          jobSetConfigStr(F("nodename"), nodeName);
+          delay(1000);
+          Events.reset();
+        }
       }
 
 
