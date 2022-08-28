@@ -182,17 +182,23 @@ void handleUdpPacket() {
       // it is a reception broadcast
       String bStr = grabFromStringUntil(aStr, '\t');
       //aStr => 'cardreader  BetaPorte_2B  cardid  1626D989  user  Pierre H'
-
+      String cStr = "";
       if ( bStr.equals(F("cardreader")) ) {
-        messageUDP = grabFromStringUntil(aStr, '\t'); // event nodename
+        messageUDP += "      ";
+        cStr += grabFromStringUntil(aStr, '\t'); // event nodename
         bStr = grabFromStringUntil(aStr, '\t'); // 'cardid'
         bStr = grabFromStringUntil(aStr, '\t');  // cardid (value)
         bStr = grabFromStringUntil(aStr, '\t');  // 'user'
-        messageUDP += " : ";
-        messageUDP += aStr;
-        D_println(messageUDP);
-        Events.delayedPush(500, evUDPEvent);
+        cStr += " : ";
+        cStr += aStr;
+        D_println(cStr);
 
+        if (messageUDP.indexOf(cStr) < 0) {
+          messageUDP += "    ";
+          messageUDP += cStr;
+        }
+        Events.delayedPush(500, evNewStatus);
+        Events.delayedPush(3 * 60 * 1000, evEraseUdp);
         return;
       }
     }
@@ -216,7 +222,18 @@ void betaBriteWrite(const String & aMessage) {
 
   //Serial1.print("\x03");  (only for check sum)
   Serial1.print(F("\x04"));  // fin de transmission
-
+//• 1CH + “1” (31H) = Red
+//• 1CH + “2” (32H) = Green
+//• 1CH + “3” (33H) = Amber
+//• 1CH + “4” (34H) = Dim red
+//• 1CH + “5” (35H) = Dim green
+//• 1CH + “6” (36H) = Brown
+//• 1CH + “7” (37H) = Orange
+//• 1CH + “8” (38H) = Yellow
+//• 1CH + “9” (39H) = Rainbow 1
+//• 1CH + “A” (41H) = Rainbow 2
+//• 1CH + “B” (42H) = Color mix
+//• 1CH + “C” (43H) = Autocolor
 }
 
 

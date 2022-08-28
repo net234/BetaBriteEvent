@@ -59,11 +59,11 @@ enum tUserEventCode {
   // evenement utilisateurs
   evBP0 = 100,      // low = low power allowed
   evLed0,
-  evUDPEvent,         // Trame UDP avec un evenement
+  //evUDPEvent,         // Trame UDP avec un evenement
   evCheckWWW,
   evCheckAPI,
   evNewStatus,
-
+  evEraseUdp,
   // evenement action
   doReset,
 };
@@ -248,20 +248,19 @@ void loop() {
               // lisen UDP 23423
               Serial.println("Listen broadcast");
               MyUDP.begin(localUdpPort);
-              Events.delayedPush(checkWWW_DELAY, evCheckWWW); // will send mail
-              Events.delayedPush(checkAPI_DELAY, evCheckAPI);
-              String message = F("Wifi ok   ");
-              message += niceDisplayTime(currentTime, true);
-              betaBriteWrite(message);
+              Events.delayedPush(2000, evCheckWWW);
+              Events.delayedPush(4000, evCheckAPI);
+
             } else {
               WWWOk = false;
-              String message = F("Wifi hors service   ");
-              betaBriteWrite(message);
             }
-
+            Events.push(evNewStatus);
             D_println(WiFiConnected);
           }
         }
+
+
+
 
         // Save current time in RTC memory (not erased by a reset)
         currentTime = now();
@@ -270,12 +269,10 @@ void loop() {
         static uint8_t lastMinute = minute();
         if (lastMinute != minute()) {
           lastMinute = minute();
+          Events.push(evNewStatus);
 
 
 
-          String aMessage = niceDisplayTime(currentTime, true);
-          aMessage = aMessage.substring(0, aMessage.length() - 3);
-          betaBriteWrite(aMessage);
           jobBroadcastMessage("");
         }
 
@@ -292,15 +289,42 @@ void loop() {
       break;
 
 
+    case evNewStatus: {
+        String aMessage = "";
+        if (messageUDP.length() > 0) {
+          aMessage += F("\x1c""9");
+          aMessage += messageUDP;
+          aMessage += "    ";
+        }
+        aMessage += F("\x1c""3");
+        aMessage += niceDisplayTime(currentTime, true);
+        aMessage = aMessage.substring(0, aMessage.length() - 3);
 
-   case evCheckWWW:
+        if (WiFiConnected && WWWOk && APIOk) {
+          aMessage += F("\x1c""2"" Infra Ok    ");
+        } else {
+          if (!WiFiConnected) aMessage +=  F("\x1c""1"" WIFI Err ");
+          if (!WWWOk) aMessage +=  F("\x1c""1"" WWW Err ");
+          if (!APIOk) aMessage +=  F("\x1c""1"" API Err ");
+        }
+        betaBriteWrite(aMessage);
+      }
+      break;
+
+    case evEraseUdp: {
+        messageUDP = "";
+      }
+      break;
+
+
+    case evCheckWWW:
       Serial.println("evCheckWWW");
       if (WiFiConnected) {
         if (WWWOk != (getWebTime() > 0)) {
           WWWOk = !WWWOk;
           D_println(WWWOk);
-          Events.delayedPush(1000,evNewStatus);
-         }
+          Events.delayedPush(1000, evNewStatus);
+        }
         Events.delayedPush(checkWWW_DELAY, evCheckWWW);
       }
       break;
@@ -311,49 +335,33 @@ void loop() {
           JSONVar jsonData;
           jsonData["timeZone"] = timeZone;
           jsonData["timestamp"] = (double)currentTime;
- //         jsonData["sonde1"] = sonde1;
- //         jsonData["sonde2"] = sonde2;
+          //         jsonData["sonde1"] = sonde1;
+          //         jsonData["sonde2"] = sonde2;
           String jsonStr = JSON.stringify(jsonData);
           if ( APIOk != dialWithPHP(nodeName, "timezone", jsonStr) ) {
             APIOk = !APIOk;
             D_println(APIOk);
-            Events.delayedPush(1000,evNewStatus);
- //           writeHisto( APIOk ? F("API Ok") : F("API Err"), "magnus2.frdev" );
+            Events.delayedPush(1000, evNewStatus);
+            //           writeHisto( APIOk ? F("API Ok") : F("API Err"), "magnus2.frdev" );
           }
           if (APIOk) {
             jsonData = JSON.parse(jsonStr);
             time_t aTimeZone = (const double)jsonData["timezone"];
             D_println(aTimeZone);
             if (aTimeZone != timeZone) {
- //             writeHisto( F("Old TimeZone"), String(timeZone) );
+              //             writeHisto( F("Old TimeZone"), String(timeZone) );
               timeZone = aTimeZone;
               jobSetConfigInt("timezone", timeZone);
               // force recalculation of time
               setSyncProvider(getWebTime);
               currentTime = now();
-  //            writeHisto( F("New TimeZone"), String(timeZone) );
+              //            writeHisto( F("New TimeZone"), String(timeZone) );
             }
           }
         }
         Events.delayedPush(checkAPI_DELAY, evCheckAPI);
       }
       break;
-
-
-
-
-    // Arrivee d'un badge via trame distante (info dans messageUDP)
-    case evUDPEvent: {
-
-        D_println(messageUDP);
-        String message = messageUDP;
-        message += "          ";
-
-        betaBriteWrite(message);
-
-      }
-      break;
-
 
 
 
