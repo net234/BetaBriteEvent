@@ -18,7 +18,7 @@
 #define D7  13    //!SPI_MOSI   BP0_PIN
 #define D8  15    //!BOOT_STS            
 
-#define BP0_PIN   D7                 //  High to Low = will wleep in, 5 minutes 
+// #define BP0_PIN   D7                 //  High to Low = will wleep in, 5 minutes 
 #define LED0_PIN  LED_BUILTIN   //   By default Led0 is on LED_BUILTIN you can change it
 
 #define I2C_SDA  D2

@@ -119,96 +119,21 @@ String grabFromStringUntil(String & aString, const char aKey) {
 
 
 
-const  IPAddress broadcastIP(255, 255, 255, 255);
 
-bool jobBroadcastMessage(const String & aMessage) {
-  Serial.println("Send broadcast ");
-  String message = F("event\tbetaBrite\talive");
-
-  message += '\n';
-
-  if ( !MyUDP.beginPacket(broadcastIP, localUdpPort) ) return false;
-  MyUDP.write(message.c_str(), message.length());
-
-  MyUDP.endPacket();
-
-  delay(100);
-
-  if ( !MyUDP.beginPacket(broadcastIP, localUdpPort) ) return false;
-  MyUDP.write(message.c_str(), message.length());
-
-  MyUDP.endPacket();
-
-  delay(100);
-  if ( !MyUDP.beginPacket(broadcastIP, localUdpPort) ) return false;
-  MyUDP.write(message.c_str(), message.length());
-
-  MyUDP.endPacket();
-
-  Serial.print(message);
-  return true;
-}
-
-
-void handleUdpPacket() {
-  int packetSize = MyUDP.parsePacket();
-  if (packetSize) {
-    Serial.print("Received packet UDP");
-    Serial.printf("Received packet of size %d from %s:%d\n    (to %s:%d, free heap = %d B)\n",
-                  packetSize,
-                  MyUDP.remoteIP().toString().c_str(), MyUDP.remotePort(),
-                  MyUDP.destinationIP().toString().c_str(), MyUDP.localPort(),
-                  ESP.getFreeHeap());
-    const int UDP_MAX_SIZE = 200;  // we handle short messages
-    char udpPacketBuffer[UDP_MAX_SIZE + 1]; //buffer to hold incoming packet,
-    int size = MyUDP.read(udpPacketBuffer, UDP_MAX_SIZE);
-
-    // read the packet into packetBufffer
-    if (packetSize > UDP_MAX_SIZE) {
-      Serial.printf("UDP too big ");
-      return;
-    }
-
-    //TODO: clean this   cleanup line feed
-    if (size > 0 && udpPacketBuffer[size - 1] == '\n') size--;
-
-    udpPacketBuffer[size] = 0;
-
-    String aStr = udpPacketBuffer;
-    D_println(aStr);
-
-    // Broadcast
-    if  ( MyUDP.destinationIP() == broadcastIP ) {
-      // it is a reception broadcast
-      String bStr = grabFromStringUntil(aStr, '\t');
-      //aStr => 'cardreader  BetaPorte_2B  cardid  1626D989  user  Pierre H'
-      String cStr = "";
-      if ( bStr.equals(F("cardreader")) ) {
-        messageUDP += "      ";
-        cStr += grabFromStringUntil(aStr, '\t'); // event nodename
-        bStr = grabFromStringUntil(aStr, '\t'); // 'cardid'
-        bStr = grabFromStringUntil(aStr, '\t');  // cardid (value)
-        bStr = grabFromStringUntil(aStr, '\t');  // 'user'
-        cStr += " : ";
-        cStr += aStr;
-        D_println(cStr);
-
-        if (messageUDP.indexOf(cStr) < 0) {
-          messageUDP += "    ";
-          messageUDP += cStr;
-        }
-        Events.delayedPush(500, evNewStatus);
-        Events.delayedPush(3 * 60 * 1000, evEraseUdp);
-        return;
-      }
-    }
-
-
-  }
-}
 
 void betaBriteWrite(const String & aMessage) {
   Serial.print(F("Message BetaBrite : "));
+
+  if (lcdOk) {
+    lcd.clear();
+    String aStr = aMessage;
+    aStr.replace(F("\x1c""3"), "  ");
+    aStr.replace(F("\x1c""2"), "  ");
+    aStr.replace(F("\x1c""1"), "  ");
+    lcd.println(nodeName);
+    lcd.print(aStr);
+
+  }
   D_println(aMessage);
   for (int N = 0;  N < 8; N++) Serial1.write(0); // setup speed (mandatory)
   Serial1.print(F("\x01""Z00"));  // all display (mandatory)
@@ -222,18 +147,18 @@ void betaBriteWrite(const String & aMessage) {
 
   //Serial1.print("\x03");  (only for check sum)
   Serial1.print(F("\x04"));  // fin de transmission
-//• 1CH + “1” (31H) = Red
-//• 1CH + “2” (32H) = Green
-//• 1CH + “3” (33H) = Amber
-//• 1CH + “4” (34H) = Dim red
-//• 1CH + “5” (35H) = Dim green
-//• 1CH + “6” (36H) = Brown
-//• 1CH + “7” (37H) = Orange
-//• 1CH + “8” (38H) = Yellow
-//• 1CH + “9” (39H) = Rainbow 1
-//• 1CH + “A” (41H) = Rainbow 2
-//• 1CH + “B” (42H) = Color mix
-//• 1CH + “C” (43H) = Autocolor
+  //• 1CH + “1” (31H) = Red
+  //• 1CH + “2” (32H) = Green
+  //• 1CH + “3” (33H) = Amber
+  //• 1CH + “4” (34H) = Dim red
+  //• 1CH + “5” (35H) = Dim green
+  //• 1CH + “6” (36H) = Brown
+  //• 1CH + “7” (37H) = Orange
+  //• 1CH + “8” (38H) = Yellow
+  //• 1CH + “9” (39H) = Rainbow 1
+  //• 1CH + “A” (41H) = Rainbow 2
+  //• 1CH + “B” (42H) = Color mix
+  //• 1CH + “C” (43H) = Autocolor
 }
 
 
@@ -285,13 +210,13 @@ bool dialWithPHP(const String& aNode, const String& aAction,  String& jsonParam)
     #define HTTPC_ERROR_READ_TIMEOUT        (-11)
     ****/
   if (httpCode < 0) {
-  Serial.print(F("cant get an answer :( http.GET()="));
+    Serial.print(F("cant get an answer :( http.GET()="));
     Serial.println(httpCode);
     http.end();   //Close connection
     return (false);
   }
   if (httpCode != 200) {
-  Serial.print(F("got an error in http.GET() "));
+    Serial.print(F("got an error in http.GET() "));
     D_println(httpCode);
     http.end();   //Close connection
     return (false);

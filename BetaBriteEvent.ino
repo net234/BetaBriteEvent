@@ -27,6 +27,10 @@
     - refonte du protocole betaDomo (ajout json)
     - ajout surveillance du wifi  acces web  et acces intanet
     - correction pour avoir la timeZone automatiquement
+   V1.2  (07/09/2022)
+    _ ajout d'un afficheur LCD 4x 20
+    - creation d'un module evenementiel udpEvent pour une gestion des messgae en UDP
+
 
 *************************************************/
 
@@ -34,7 +38,7 @@
 #include "ESP8266.h"
 static_assert(sizeof(time_t) == 8, "This version works with time_t 64bit  move to ESP8266 kernel 3.0 or more");
 
-#define APP_NAME "BetaBriteEvent V1.1"
+#define APP_NAME "BetaBriteEvent V1.2"
 
 
 //
@@ -59,7 +63,7 @@ enum tUserEventCode {
   // evenement utilisateurs
   evBP0 = 100,      // low = low power allowed
   evLed0,
-  //evUDPEvent,         // Trame UDP avec un evenement
+  evUdp,         // Trame UDP avec un evenement
   evCheckWWW,
   evCheckAPI,
   evNewStatus,
@@ -85,6 +89,19 @@ enum tUserEventCode {
 //#define DEFAULT_PIN
 // les sortie pour la led et le poussoir sont definis dans esp8266.h avec BP0_PIN  et LED0_PIN
 #include <BetaEvents.h>
+
+//  Info I2C
+
+#define LCD_I2CADR  0x4E / 2  //adresse LCD
+
+#include <Wire.h>         // Gestion I2C
+
+// Instance LCD
+#include <LiquidCrystal_PCF8574.h>
+LiquidCrystal_PCF8574 lcd(LCD_I2CADR); // set the LCD address
+
+
+
 
 // littleFS
 #include <LittleFS.h>  //Include File System Headers 
@@ -124,12 +141,16 @@ bool     APIOk = false;
 //int      currentMonth = -1;
 bool sleepOk = true;
 
+// gestion de l'ecran
 
-#include <WiFiUdp.h>
-// port d'ecoute UDP
+bool  lcdOk = false;
+
+// init UDP
+#include  "evHandlerUdp.h"
 const unsigned int localUdpPort = 23423;      // local port to listen on
-//Objet UDP pour la liaison avec la console
-WiFiUDP MyUDP;
+evHandlerUdp myUdp(evUdp,localUdpPort,nodeName);
+
+
 
 
 void setup() {
@@ -187,6 +208,24 @@ void setup() {
   }
   D_println(timeZone);
 
+  //Init I2C
+  Wire.begin(I2C_SDA, I2C_SCL);
+
+  //  Check LCD
+  if (!checkI2C(LCD_I2CADR)) {
+    Serial.println(F("No LCD detected"));
+  }
+
+  // Init LCD
+
+  lcd.begin(20, 4); // initialize the lcd
+  lcd.setBacklight(100);
+  lcd.println(F(APP_NAME));
+  lcd.println(F("Bonjour"));
+
+
+
+
   String message = F("Bonjour ...   ");
   message += niceDisplayTime(currentTime, true);
   betaBriteWrite(message);
@@ -204,9 +243,8 @@ void loop() {
   Events.handle();
   switch (Events.code)
   {
-    case evNill:
-      handleUdpPacket();        // handle UDP connection other betaporte
-      break;
+//    case evNill:
+//      break;
 
 
     case evInit:
@@ -238,7 +276,7 @@ void loop() {
           //    WL_CONNECTION_LOST  = 5,
           //    WL_DISCONNECTED     = 6
           WiFiConnected = (WiFiStatus == WL_CONNECTED);
-          static bool wasConnected = WiFiConnected;
+          static bool wasConnected = false;
           if (wasConnected != WiFiConnected) {
             wasConnected = WiFiConnected;
             Led0.setFrequence(WiFiConnected ? 1 : 2);
@@ -247,9 +285,9 @@ void loop() {
               setSyncInterval(6 * 3600);
               // lisen UDP 23423
               Serial.println("Listen broadcast");
-              MyUDP.begin(localUdpPort);
-              Events.delayedPush(2000, evCheckWWW);
-              Events.delayedPush(4000, evCheckAPI);
+              myUdp.begin();
+              Events.delayedPush(5000, evCheckWWW);
+              Events.delayedPush(7000, evCheckAPI);
 
             } else {
               WWWOk = false;
@@ -259,6 +297,11 @@ void loop() {
           }
         }
 
+        // check lcd
+        if ( lcdOk != checkI2C(LCD_I2CADR)) {
+          lcdOk = !lcdOk;
+          D_println(lcdOk);
+        }
 
 
 
@@ -273,7 +316,7 @@ void loop() {
 
 
 
-          jobBroadcastMessage("");
+          myUdp.broadcast("{\"init\":\"afficheur\"}");
         }
 
         // If we are not connected we warn the user every 30 seconds that we need to update credential
@@ -462,6 +505,12 @@ void loop() {
 
 // helpers
 
+// Check I2C
+bool checkI2C(const uint8_t i2cAddr)
+{
+  Wire.beginTransmission(i2cAddr);
+  return (Wire.endTransmission() == 0);
+}
 
 // fatal error
 // flash led0 same number as error 10 time then reset
