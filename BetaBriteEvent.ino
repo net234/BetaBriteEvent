@@ -316,7 +316,7 @@ void loop() {
 
 
 
-          myUdp.broadcast("{\"init\":\"afficheur\"}");
+          if (WiFiConnected) myUdp.broadcast("{\"init\":\"afficheur\"}");
         }
 
         // If we are not connected we warn the user every 30 seconds that we need to update credential
