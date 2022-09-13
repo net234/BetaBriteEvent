@@ -148,7 +148,7 @@ bool  lcdOk = false;
 // init UDP
 #include  "evHandlerUdp.h"
 const unsigned int localUdpPort = 23423;      // local port to listen on
-evHandlerUdp myUdp(evUdp,localUdpPort,nodeName);
+evHandlerUdp myUdp(evUdp, localUdpPort, nodeName);
 
 
 
@@ -243,8 +243,8 @@ void loop() {
   Events.handle();
   switch (Events.code)
   {
-//    case evNill:
-//      break;
+    //    case evNill:
+    //      break;
 
 
     case evInit:
@@ -330,7 +330,21 @@ void loop() {
       }
 
       break;
-
+    case evUdp: {
+        if (Events.ext == evxUdpRxMessage) {
+          D_print(myUdp.rxHeader);
+          D_print(myUdp.rxNode);
+          D_println(myUdp.rxJson);
+          if (lcdOk) {
+            lcd.setCursor(0, 2);
+            lcd.print(myUdp.rxHeader);
+            lcd.print(' ');
+            lcd.println(myUdp.rxNode);
+            lcd.print(myUdp.rxJson);
+          }
+        }
+      }
+      break;
 
     case evNewStatus: {
         String aMessage = "";
