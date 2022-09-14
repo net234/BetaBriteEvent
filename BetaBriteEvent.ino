@@ -134,6 +134,8 @@ int8_t   timeZone = -2;          //les heures sont toutes en localtimes
 bool     configOk = true; // global used by getConfig...
 
 String   messageUDP;  //trame UDP
+String   openDoors;
+
 //String   message;
 
 bool     WWWOk = false;
@@ -171,7 +173,8 @@ void setup() {
   }
 
   //  message.reserve(200);
-  //  messageUDP.reserve(16);
+  messageUDP.reserve(100);
+  openDoors.reserve(100);
 
   //  Serial.println(F("Bonjour ...."));
 
@@ -332,6 +335,7 @@ void loop() {
       break;
     case evUdp: {
         if (Events.ext == evxUdpRxMessage) {
+          D_print(myUdp.bcast);
           D_print(myUdp.rxHeader);
           D_print(myUdp.rxNode);
           D_println(myUdp.rxJson);
@@ -342,13 +346,63 @@ void loop() {
             lcd.println(myUdp.rxNode);
             lcd.print(myUdp.rxJson);
           }
+          if (!myUdp.bcast) return;
+          JSONVar jsonData = JSON.parse(myUdp.rxJson);
+          String action = (const char*)jsonData["action"];
+          D_println(action);
+          if (action.equals(F("badge"))) {
+            //eceived packet UDPmyUdp.rxHeader => 'EVENT', myUdp.rxNode => 'Betaporte_2B', myUdp.rxJson => '{"action":"badge","userid":"Test_5"}'
+
+            String aStr = myUdp.rxNode;
+
+            aStr += " : ";
+            aStr += (const char*)jsonData["userid"];  //
+            D_println(aStr);
+
+            if (messageUDP.indexOf(aStr) < 0) {
+              messageUDP += "    ";
+              messageUDP += aStr;
+            }
+            Events.delayedPush(500, evNewStatus);
+            Events.delayedPush(3 * 60 * 1000, evEraseUdp);
+            return;
+
+          }
+
+          
+
+          if (action.equals(F("porte"))) {
+            //Received packet UDPmyUdp.bcast => '1', myUdp.rxHeader => 'EVENT', myUdp.rxNode => 'Betaporte_2', myUdp.rxJson => '{"action":"porte","close":false}'
+            bool closed = (bool)jsonData["close"];
+            String aStr = myUdp.rxNode + ' ';
+            if (closed) {
+              openDoors.replace(aStr,"");
+              openDoors.trim();
+            } else {
+              if (openDoors.indexOf(aStr) < 0) {
+                openDoors += aStr;
+              }
+            }
+            
+            Events.delayedPush(500, evNewStatus);
+            //Events.delayedPush(3 * 60 * 1000, evEraseUdp);
+            return;
+
+          }
+
+
+
         }
       }
       break;
 
     case evNewStatus: {
         String aMessage = "";
-        if (messageUDP.length() > 0) {
+         if (openDoors.length() > 0) {
+          aMessage += F("  \x1c""9"" porte ouverte : ");
+          aMessage += openDoors;
+        }
+       if (messageUDP.length() > 0) {
           aMessage += F("\x1c""9");
           aMessage += messageUDP;
           aMessage += "    ";
@@ -363,7 +417,7 @@ void loop() {
           if (!WiFiConnected) aMessage +=  F("\x1c""1"" WIFI Err ");
           if (!WWWOk) aMessage +=  F("\x1c""1"" WWW Err ");
           if (!APIOk) aMessage +=  F("\x1c""1"" API Err ");
-        }
+        } 
         betaBriteWrite(aMessage);
       }
       break;
