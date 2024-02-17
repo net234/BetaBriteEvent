@@ -38,7 +38,7 @@ String jobGetConfigStr(const String aKey) {
 
   JSONVar jsonConfig = JSON.parse(aFile.readStringUntil('\n'));
   aFile.close();
-  if (JSON.typeof(jsonConfig[aKey]) == F("string") ) result = (const char*)jsonConfig[aKey];
+  if (JSON.typeof(jsonConfig[aKey]) == F("string")) result = (const char*)jsonConfig[aKey];
 
   return (result);
 }
@@ -73,7 +73,7 @@ int jobGetConfigInt(const String aKey) {
 
   D_println(JSON.typeof(jsonConfig[aKey]));
   configOk = JSON.typeof(jsonConfig[aKey]) == F("number");
-  if (configOk ) result = jsonConfig[aKey];
+  if (configOk) result = jsonConfig[aKey];
   return (result);
 }
 
@@ -98,7 +98,7 @@ bool jobSetConfigInt(const String aKey, const int aValue) {
 
 
 void eraseConfig() {
-  Serial.println(F("Erase config") );
+  Serial.println(F("Erase config"));
   MyLittleFS.remove(CONFIG_FNAME);
 }
 
@@ -108,25 +108,40 @@ void eraseConfig() {
 
 
 
-void betaBriteWrite(const String & aMessage) {
+void betaBriteWrite(const String& aMessage) {
   Serial.print(F("Message BetaBrite : "));
 
-  if (lcdOk) {
-    lcd.clear();
-    String aStr = aMessage;
-    aStr.replace(F("\x1c""3"), "  ");
-    aStr.replace(F("\x1c""2"), "  ");
-    aStr.replace(F("\x1c""1"), "  ");
-    lcd.println(nodeName);
-    lcd.print(aStr);
 
-  }
-  D_println(aMessage);
-  for (int N = 0;  N < 8; N++) Serial1.write(0); // setup speed (mandatory)
-  Serial1.print(F("\x01""Z00"));  // all display (mandatory)
-  Serial1.print(F("\x02""AA"));   // write to A file (mandatory)
-  Serial1.print(F("\x1b"" a"));   // mode defilant
-  Serial1.print(F("\x1c""3"));    // couleur ambre
+   lcdMessage = aMessage;
+  lcdMessage.replace(F("\x1c"
+                       "3"),
+                     "");
+  lcdMessage.replace(F("\x1c"
+                       "2"),
+                     "");
+  lcdMessage.replace(F("\x1c"
+                       "1"),
+                     "");
+  lcdMessage.replace(F("\x1c"
+                       "8"),
+                     "");
+  lcdMessage.replace(F("\x1c"
+                       "9"),
+                     "");
+  if (lcdOk) Events.delayedPush(500, evLcdRefresh, 0);
+
+
+
+  D_println(lcdMessage);
+  for (int N = 0; N < 8; N++) Serial1.write(0);  // setup speed (mandatory)
+  Serial1.print(F("\x01"
+                  "Z00"));  // all display (mandatory)
+  Serial1.print(F("\x02"
+                  "AA"));  // write to A file (mandatory)
+  Serial1.print(F("\x1b"
+                  " a"));  // mode defilant
+  Serial1.print(F("\x1c"
+                  "3"));  // couleur ambre
   Serial1.print(aMessage);
   //Serial1.print(F("\x1c""1"));    // couleur rouge
   //Serial1.print(number++);
@@ -154,7 +169,7 @@ void betaBriteWrite(const String & aMessage) {
 // passage du json en string
 //
 
-bool dialWithPHP(const String& aNode, const String& aAction,  String& jsonParam) {
+bool dialWithPHP(const String& aNode, const String& aAction, String& jsonParam) {
   //D_println(helperFreeRam() + 000);
   Serial.print(F("Dial With http as '"));
   Serial.print(aNode);
@@ -162,11 +177,12 @@ bool dialWithPHP(const String& aNode, const String& aAction,  String& jsonParam)
   Serial.print(aAction);
   Serial.println('\'');
   //{
-  String aUri =  HTTP_API;
+  String aUri = HTTP_API;
   aUri += F("?action=");  // my FAI web server
   aUri += encodeUri(aAction);
   aUri += F("&node=");
-  aUri += encodeUri(aNode);;
+  aUri += encodeUri(aNode);
+  ;
 
   // les parametres eventuels sont passées en JSON dans le parametre '&json='
   if (jsonParam.length() > 0) {
@@ -179,9 +195,9 @@ bool dialWithPHP(const String& aNode, const String& aAction,  String& jsonParam)
   WiFiClient client;
   HTTPClient http;  //Declare an object of class HTTPClient
   D_println(aUri);
-  http.begin(client, aUri); //Specify request destination
+  http.begin(client, aUri);  //Specify request destination
 
-  int httpCode = http.GET();                                  //Send the request
+  int httpCode = http.GET();  //Send the request
   /*** HTTP client errors
      #define HTTPCLIENT_DEFAULT_TCP_TIMEOUT (5000)
     #define HTTPC_ERROR_CONNECTION_FAILED   (-1)
@@ -199,25 +215,25 @@ bool dialWithPHP(const String& aNode, const String& aAction,  String& jsonParam)
   if (httpCode < 0) {
     Serial.print(F("cant get an answer :( http.GET()="));
     Serial.println(httpCode);
-    http.end();   //Close connection
+    http.end();  //Close connection
     return (false);
   }
   if (httpCode != 200) {
     Serial.print(F("got an error in http.GET() "));
     D_println(httpCode);
-    http.end();   //Close connection
+    http.end();  //Close connection
     return (false);
   }
 
 
-  aUri = http.getString();   //Get the request response payload
+  aUri = http.getString();  //Get the request response payload
   //D_println(helperFreeRam() + 1);
-  http.end();   //Close connection (restore 22K of ram)
-  D_println(aUri.length());             //Print the response payload
+  http.end();                //Close connection (restore 22K of ram)
+  D_println(aUri.length());  //Print the response payload
   //D_println(bigString);
   // check json string without real json lib  not realy good but use less memory and faster
   int16_t answerPos = aUri.indexOf(F(",\"answer\":{"));
-  if ( !aUri.startsWith(F("{\"status\":true,")) || answerPos < 0 ) {
+  if (!aUri.startsWith(F("{\"status\":true,")) || answerPos < 0) {
     return (false);
   }
   // hard cut of "answer":{ xxxxxx } //
@@ -238,15 +254,15 @@ String encodeUri(const String aUri) {
     //TODO:  should I keep " " to "+" conversion ????  save 2 char but oldy
     if (aChar == ' ') {
       answer += '+';
-    } else if ( isAlphaNumeric(aChar) ) {
-      answer +=  aChar;
+    } else if (isAlphaNumeric(aChar)) {
+      answer += aChar;
     } else if (specialChar.indexOf(aChar) >= 0) {
-      answer +=  aChar;
+      answer += aChar;
     } else {
-      answer +=  '%';
-      answer += Hex2Char( aChar >> 4 );
-      answer += Hex2Char( aChar & 0xF);
-    } // if alpha
+      answer += '%';
+      answer += Hex2Char(aChar >> 4);
+      answer += Hex2Char(aChar & 0xF);
+    }  // if alpha
   }
   return (answer);
 }

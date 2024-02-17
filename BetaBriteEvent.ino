@@ -68,6 +68,8 @@ enum tUserEventCode {
   evCheckAPI,
   evNewStatus,
   evEraseUdp,
+  evPostInit,
+  evLcdRefresh,
   // evenement action
   doReset,
 };
@@ -136,6 +138,7 @@ bool configOk = true;  // global used by getConfig...
 
 String messageUDP;  //trame UDP
 String openDoors;
+bool postInit = false;
 
 //String   message;
 
@@ -144,6 +147,8 @@ bool APIOk = false;
 //int      currentMonth = -1;
 bool sleepOk = true;
 JSONVar temperatures;
+String displayText;
+String lcdMessage;
 
 // gestion de l'ecran
 
@@ -177,6 +182,8 @@ void setup() {
   //  message.reserve(200);
   messageUDP.reserve(100);
   openDoors.reserve(100);
+  displayText.reserve(200);
+  lcdMessage.reserve(200);
 
   //  Serial.println(F("Bonjour ...."));
 
@@ -253,8 +260,13 @@ void loop() {
 
     case evInit:
       Serial.println("Init");
+      Events.delayedPush(10000, evPostInit);
       break;
 
+    case evPostInit:
+      postInit = true;
+      Events.push(evNewStatus);
+      break;
 
     case ev24H:
       {
@@ -308,6 +320,13 @@ void loop() {
           lcdOk = !lcdOk;
           D_println(lcdOk);
         }
+        if (lcdOk and postInit) {
+          lcd.setCursor(0, 0);
+          lcd.println(APP_NAME);
+          String aStr = niceDisplayTime(currentTime,true);
+          lcd.println(aStr);
+        }
+
 
 
 
@@ -423,6 +442,23 @@ void loop() {
       }
       break;
 
+
+      /*
+1CH+“1”(31H)=Red
+• 1CH + “2” (32H) = Green
+• 1CH + “3” (33H) = Amber
+• 1CH + “4” (34H) = Dim red
+• 1CH + “5” (35H) = Dim green
+• 1CH+“6”(36H)=Brown
+• 1CH + “7” (37H) = Orange
+• 1CH + “8” (38H) = Yellow
+• 1CH + “9” (39H) = Rainbow 1
+• 1CH + “A” (41H) = Rainbow 2
+• 1CH + “B” (42H) = Color mix
+• 1CH+“C”(43H)=Autocolor
+• 1CH+“ZRRGGBB”=(Alpha3.0protocol only.) Change the font color to this RGB value (“RRGGBB” = Red, Green, and Blue color intensities in ASCII hexadecimal from “00” to “FF”.)
+• 1CH+“YRRGGBB”=(Alpha3.0protocol only.) Change the color of the shaded portion of the font to this RGB value (“RRGGBB” = Red, Green, and Blue color intensities in ASCII hexadecimal from “00” to “FF”.)
+*/
     case evNewStatus:
       {
         String aMessage = "";
@@ -471,11 +507,42 @@ void loop() {
             aMessage += "  ";
           }
         }
+        if (displayText.length()) {
+          aMessage += F("\x1c"
+                        "8");  //Yellow
+          aMessage += displayText;
 
+          aMessage += "  ";
+        }
 
-        betaBriteWrite(aMessage);
+        if (postInit) betaBriteWrite(aMessage);
+        if (lcdOk) Events.delayedPush(300, evLcdRefresh, 0);
       }
       break;
+
+    case evLcdRefresh:
+      {
+        if (!lcdOk) break;
+
+        uint displayStep = Events.intExt;
+        //D_print(displayStep);
+        lcd.setCursor(0, 2);
+        // lcd.print(LCD_CLREOL "\r\n" LCD_CLREOL);
+        // lcd.setCursor(0, 2);
+        String aStr = lcdMessage;
+        //aStr += F("                                            ");
+        aStr = aStr.substring(displayStep, displayStep+39);
+        lcd.print(aStr);
+        lcd.print(LCD_CLREOL);
+
+
+        displayStep++;
+
+        if (displayStep > lcdMessage.length() - 10) displayStep = 0;
+        Events.delayedPush(500, evLcdRefresh, displayStep);
+      }
+      break;
+
 
     case evEraseUdp:
       {
@@ -582,7 +649,15 @@ void loop() {
         }
       }
 
-
+      if (Keyboard.inputString.startsWith(F("DSP="))) {
+        Serial.println(F("DISPLAY : 'DSP= atext "));
+        String aStr = Keyboard.inputString;
+        grabFromStringUntil(aStr, '=');
+        aStr.trim();
+        D_println(aStr);
+        displayText = aStr;
+        Events.push(evNewStatus);
+      }
 
 
       if (Keyboard.inputString.startsWith(F("WIFI="))) {
