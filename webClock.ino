@@ -68,7 +68,7 @@ time_t getWebTime() {
   time_t serverTS = makeTime(dateStruct) - (timeZone * 3600); // change to local time
   D_println(timeZone);
   int deltaTime = serverTS - currentTime;
-  D_println(deltaTime);
+  D1_println(deltaTime);
   D_println(niceDisplayTime(serverTS));
  // D_println(helperFreeRam());
   // we dont use the payload here
