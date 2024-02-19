@@ -109,10 +109,10 @@ void eraseConfig() {
 
 
 void betaBriteWrite(const String& aMessage) {
-  Serial.print(F("Message BetaBrite : "));
+  Serial.print(F("Send Message BetaBrite : "));
+  Serial.println(aMessage);
 
-
-   lcdMessage = aMessage;
+  lcdMessage = aMessage;
   lcdMessage.replace(F("\x1c"
                        "3"),
                      "");
@@ -132,10 +132,10 @@ void betaBriteWrite(const String& aMessage) {
 
 
 
-  D_println(lcdMessage);
+
   for (int N = 0; N < 8; N++) Serial1.write(0);  // setup speed (mandatory)
-  Serial1.print(F("\x01"
-                  "Z00"));  // all display (mandatory)
+Serial1.print(F("\x01"
+                "Z00"));  // all display (mandatory)
   Serial1.print(F("\x02"
                   "AA"));  // write to A file (mandatory)
   Serial1.print(F("\x1b"
