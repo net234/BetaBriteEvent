@@ -38,7 +38,7 @@
 #include "ESP8266.h"
 static_assert(sizeof(time_t) == 8, "This version works with time_t 64bit  move to ESP8266 kernel 3.0 or more");
 
-#define APP_NAME "BetaBriteEvent V1.3"
+#define APP_NAME "BetaBriteEvent V1.4"
 
 
 //
@@ -91,7 +91,7 @@ enum tUserEventCode {
 //#define DEFAULT_PIN
 // les sortie pour la led et le poussoir sont definis dans esp8266.h avec BP0_PIN  et LED0_PIN
 #define DEBUG_ON
-#include <BetaEvents.h>
+#include <BetaEvents32.h>
 
 //  Info I2C
 
@@ -171,7 +171,7 @@ void setup() {
   // Start instance
   Events.begin();
 
-  D_println(WiFi.getMode());
+  DV_println(WiFi.getMode());
   // normaly not needed
   if (WiFi.getMode() != WIFI_STA) {
     Serial.println(F("!!! Force WiFi to STA mode !!!"));
@@ -209,7 +209,7 @@ void setup() {
     Serial.println(F("!!! Configurer le nom de la device avec 'NODE=nodename' !!!"));
     //   configErr = true;
   }
-  D_println(nodeName);
+  DV_println(nodeName);
 
   // recuperation de la timezone dans la config
   timeZone = jobGetConfigInt(F("timezone"));
@@ -218,7 +218,7 @@ void setup() {
     jobSetConfigInt(F("timezone"), timeZone);
     Serial.println(F("!!! timezone !!!"));
   }
-  D_println(timeZone);
+  DV_println(timeZone);
 
   //Init I2C
   Wire.begin(I2C_SDA, I2C_SCL);
@@ -245,22 +245,22 @@ void setup() {
   Serial.println("Bonjour ....");
   Serial.println("Tapez '?' pour avoir la liste des commandes");
 
-  D_println(Events.freeRam());
+  DV_println(Events.freeRam());
 }
 
-String niceDisplayTime(const time_t time, bool full = false);
+//String niceDisplayTime(const time_t time, bool full = false);
 
 void loop() {
   Events.get(sleepOk);
   Events.handle();
   switch (Events.code) {
-      //    case evNill:
-      //      break;
+    //    case evNill:
+    //      break;
 
 
     case evInit:
       Serial.println("Init");
-      Events.delayedPush(10000, evPostInit);
+      Events.delayedPushMilli(10000, evPostInit);
       break;
 
     case evPostInit:
@@ -271,7 +271,7 @@ void loop() {
     case ev24H:
       {
         String newDateTime = niceDisplayTime(currentTime, true);
-        D_println(newDateTime);
+        DV_println(newDateTime);
       }
       break;
 
@@ -285,7 +285,7 @@ void loop() {
         uint8_t WiFiStatus = WiFi.status();
         if (oldWiFiStatus != WiFiStatus) {
           oldWiFiStatus = WiFiStatus;
-          D_println(WiFiStatus);
+          DV_println(WiFiStatus);
           //    WL_IDLE_STATUS      = 0,
           //    WL_NO_SSID_AVAIL    = 1,
           //    WL_SCAN_COMPLETED   = 2,
@@ -304,26 +304,26 @@ void loop() {
               // lisen UDP 23423
               Serial.println("Listen broadcast");
               myUdp.begin();
-              Events.delayedPush(5000, evCheckWWW);
-              Events.delayedPush(7000, evCheckAPI);
+              Events.delayedPushMilli(5000, evCheckWWW);
+              Events.delayedPushMilli(7000, evCheckAPI);
 
             } else {
               WWWOk = false;
             }
             Events.push(evNewStatus);
-            D_println(WiFiConnected);
+            DV_println(WiFiConnected);
           }
         }
 
         // check lcd
         if (lcdOk != checkI2C(LCD_I2CADR)) {
           lcdOk = !lcdOk;
-          D_println(lcdOk);
+          DV_println(lcdOk);
         }
         if (lcdOk and postInit) {
           lcd.setCursor(0, 0);
           lcd.println(APP_NAME);
-          String aStr = niceDisplayTime(currentTime,true);
+          String aStr = niceDisplayTime(currentTime, true);
           lcd.println(aStr);
         }
 
@@ -348,7 +348,7 @@ void loop() {
         if (!WiFiConnected && second() % 30 == 15) {
           // every 30 sec
           Serial.print(F("module non connecté au Wifi local "));
-          D_println(WiFi.SSID());
+          DV_println(WiFi.SSID());
           Serial.println(F("taper WIFI= pour configurer le Wifi"));
         }
       }
@@ -357,15 +357,15 @@ void loop() {
     case evUdp:
       {
         if (Events.ext == evxUdpRxMessage) {
-          D_print(myUdp.bcast);
-          D_print(myUdp.rxHeader);
-          D_print(myUdp.rxNode);
-          D_println(myUdp.rxJson);
+          DTV_print("from", myUdp.rxFrom);
+          DTV_println("got an Event UDP", myUdp.rxJson);
+          
+
           if (lcdOk) {
             lcd.setCursor(0, 2);
-            lcd.print(myUdp.rxHeader);
-            lcd.print(' ');
-            lcd.println(myUdp.rxNode);
+            //lcd.print(myUdp.rxHeader);
+            //lcd.print(' ');
+            lcd.println(myUdp.rxFrom);
             lcd.print(myUdp.rxJson);
           }
           if (!myUdp.bcast) return;
@@ -378,7 +378,7 @@ void loop() {
             double aValue = rxJson2[aName];
             //DV_println(aValue);
             temperatures[aName] = aValue;
-            D_println(temperatures);
+            DV_println(temperatures);
             return;
           }
           //CMD
@@ -389,32 +389,32 @@ void loop() {
             if (dest.equals("ALL") or (dest.length() > 3 and nodeName.startsWith(dest))) {
               String aCmd = rxJson2[dest];
               aCmd.trim();
-              D_println(aCmd);
+              DV_println(aCmd);
               if (aCmd.startsWith(F("NODE=")) and !nodeName.equals(dest)) break;  // NODE= not allowed on aliases
               if (aCmd.length()) Keyboard.setInputString(aCmd);
             } else {
-              TD_println("CMD not for me.", dest);
+              DTV_println("CMD not for me.", dest);
             }
           }
 
 
           String action = (const char*)jsonData["action"];
-          D_println(action);
+          DV_println(action);
           if (action.equals(F("badge"))) {
             //eceived packet UDPmyUdp.rxHeader => 'EVENT', myUdp.rxNode => 'Betaporte_2B', myUdp.rxJson => '{"action":"badge","userid":"Test_5"}'
 
-            String aStr = myUdp.rxNode;
+            String aStr = myUdp.rxFrom;
 
             aStr += " : ";
             aStr += (const char*)jsonData["userid"];  //
-            D_println(aStr);
+            DV_println(aStr);
 
             if (messageUDP.indexOf(aStr) < 0) {
               messageUDP += "    ";
               messageUDP += aStr;
             }
-            Events.delayedPush(500, evNewStatus);
-            Events.delayedPush(5 * 60 * 1000, evEraseUdp);
+            Events.delayedPushMilli(500, evNewStatus);
+            Events.delayedPushMilli(5 * 60 * 1000, evEraseUdp);
             return;
           }
 
@@ -423,7 +423,7 @@ void loop() {
           if (action.equals(F("porte"))) {
             //Received packet UDPmyUdp.bcast => '1', myUdp.rxHeader => 'EVENT', myUdp.rxNode => 'Betaporte_2', myUdp.rxJson => '{"action":"porte","close":false}'
             bool closed = (bool)jsonData["close"];
-            String aStr = myUdp.rxNode + ' ';
+            String aStr = myUdp.rxFrom + ' ';
             if (closed) {
               openDoors.replace(aStr, "");
               //openDoors.trim();
@@ -434,8 +434,8 @@ void loop() {
               }
             }
 
-            Events.delayedPush(500, evNewStatus);
-            //Events.delayedPush(3 * 60 * 1000, evEraseUdp);
+            Events.delayedPushMilli(500, evNewStatus);
+            //Events.delayedPushMilli(3 * 60 * 1000, evEraseUdp);
             return;
           }
         }
@@ -443,22 +443,22 @@ void loop() {
       break;
 
 
-      /*
-1CH+“1”(31H)=Red
-• 1CH + “2” (32H) = Green
-• 1CH + “3” (33H) = Amber
-• 1CH + “4” (34H) = Dim red
-• 1CH + “5” (35H) = Dim green
-• 1CH+“6”(36H)=Brown
-• 1CH + “7” (37H) = Orange
-• 1CH + “8” (38H) = Yellow
-• 1CH + “9” (39H) = Rainbow 1
-• 1CH + “A” (41H) = Rainbow 2
-• 1CH + “B” (42H) = Color mix
-• 1CH+“C”(43H)=Autocolor
-• 1CH+“ZRRGGBB”=(Alpha3.0protocol only.) Change the font color to this RGB value (“RRGGBB” = Red, Green, and Blue color intensities in ASCII hexadecimal from “00” to “FF”.)
-• 1CH+“YRRGGBB”=(Alpha3.0protocol only.) Change the color of the shaded portion of the font to this RGB value (“RRGGBB” = Red, Green, and Blue color intensities in ASCII hexadecimal from “00” to “FF”.)
-*/
+    /*
+      1CH+“1”(31H)=Red
+      • 1CH + “2” (32H) = Green
+      • 1CH + “3” (33H) = Amber
+      • 1CH + “4” (34H) = Dim red
+      • 1CH + “5” (35H) = Dim green
+      • 1CH+“6”(36H)=Brown
+      • 1CH + “7” (37H) = Orange
+      • 1CH + “8” (38H) = Yellow
+      • 1CH + “9” (39H) = Rainbow 1
+      • 1CH + “A” (41H) = Rainbow 2
+      • 1CH + “B” (42H) = Color mix
+      • 1CH+“C”(43H)=Autocolor
+      • 1CH+“ZRRGGBB”=(Alpha3.0protocol only.) Change the font color to this RGB value (“RRGGBB” = Red, Green, and Blue color intensities in ASCII hexadecimal from “00” to “FF”.)
+      • 1CH+“YRRGGBB”=(Alpha3.0protocol only.) Change the color of the shaded portion of the font to this RGB value (“RRGGBB” = Red, Green, and Blue color intensities in ASCII hexadecimal from “00” to “FF”.)
+    */
     case evNewStatus:
       {
         String aMessage = "";
@@ -485,14 +485,14 @@ void loop() {
                         " Infra Ok    ");
         } else {
           if (!WiFiConnected) aMessage += F("\x1c"
-                                            "1"
-                                            " WIFI Err ");
+                                              "1"
+                                              " WIFI Err ");
           if (!WWWOk) aMessage += F("\x1c"
-                                    "1"
-                                    " WWW Err ");
+                                      "1"
+                                      " WWW Err ");
           if (!APIOk) aMessage += F("\x1c"
-                                    "1"
-                                    " API Err ");
+                                      "1"
+                                      " API Err ");
         }
 
         JSONVar keys = temperatures.keys();
@@ -516,7 +516,7 @@ void loop() {
         }
 
         if (postInit) betaBriteWrite(aMessage);
-        if (lcdOk) Events.delayedPush(300, evLcdRefresh, 0);
+        if (lcdOk) Events.delayedPushMilli(300, evLcdRefresh, 0);
       }
       break;
 
@@ -525,13 +525,13 @@ void loop() {
         if (!lcdOk) break;
 
         uint displayStep = Events.intExt;
-        //D_print(displayStep);
+        //DV_print(displayStep);
         lcd.setCursor(0, 2);
         // lcd.print(LCD_CLREOL "\r\n" LCD_CLREOL);
         // lcd.setCursor(0, 2);
         String aStr = lcdMessage;
         //aStr += F("                                            ");
-        aStr = aStr.substring(displayStep, displayStep+39);
+        aStr = aStr.substring(displayStep, displayStep + 39);
         lcd.print(aStr);
         lcd.print(LCD_CLREOL);
 
@@ -539,7 +539,7 @@ void loop() {
         displayStep++;
 
         if (displayStep > lcdMessage.length() - 10) displayStep = 0;
-        Events.delayedPush(500, evLcdRefresh, displayStep);
+        Events.delayedPushMilli(500, evLcdRefresh, displayStep);
       }
       break;
 
@@ -556,10 +556,10 @@ void loop() {
       if (WiFiConnected) {
         if (WWWOk != (getWebTime() > 0)) {
           WWWOk = !WWWOk;
-          D_println(WWWOk);
-          Events.delayedPush(1000, evNewStatus);
+          DV_println(WWWOk);
+          Events.delayedPushMilli(1000, evNewStatus);
         }
-        Events.delayedPush(checkWWW_DELAY, evCheckWWW);
+        Events.delayedPushMilli(checkWWW_DELAY, evCheckWWW);
       }
       break;
 
@@ -575,14 +575,14 @@ void loop() {
           String jsonStr = JSON.stringify(jsonData);
           if (APIOk != dialWithPHP(nodeName, "timezone", jsonStr)) {
             APIOk = !APIOk;
-            D_println(APIOk);
-            Events.delayedPush(1000, evNewStatus);
+            DV_println(APIOk);
+            Events.delayedPushMilli(1000, evNewStatus);
             //           writeHisto( APIOk ? F("API Ok") : F("API Err"), "magnus2.frdev" );
           }
           if (APIOk) {
             jsonData = JSON.parse(jsonStr);
             time_t aTimeZone = (const double)jsonData["timezone"];
-            D_println(aTimeZone);
+            DV_println(aTimeZone);
             if (aTimeZone != timeZone) {
               //             writeHisto( F("Old TimeZone"), String(timeZone) );
               timeZone = aTimeZone;
@@ -594,7 +594,7 @@ void loop() {
             }
           }
         }
-        Events.delayedPush(checkAPI_DELAY, evCheckAPI);
+        Events.delayedPushMilli(checkAPI_DELAY, evCheckAPI);
       }
       break;
 
@@ -610,9 +610,9 @@ void loop() {
         if (Debug.trackTime < 2) {
           //char aChar = Keyboard.inputChar;
           //          if (isPrintable(aChar)) {
-          //            D_println(aChar);
+          //            DV_println(aChar);
           //          } else {
-          //            D_println(int(aChar));
+          //            DV_println(int(aChar));
           //          }
         }
         switch (Keyboard.inputChar) {
@@ -630,7 +630,7 @@ void loop() {
 
     case evInString:
       if (Debug.trackTime < 2) {
-        D_println(Keyboard.inputString);
+        DV_println(Keyboard.inputString);
       }
 
       if (Keyboard.inputString.startsWith(F("NODE="))) {
@@ -642,7 +642,7 @@ void loop() {
 
         if (aStr != "") {
           nodeName = aStr;
-          D_println(nodeName);
+          DV_println(nodeName);
           jobSetConfigStr(F("nodename"), nodeName);
           delay(1000);
           Events.reset();
@@ -654,7 +654,7 @@ void loop() {
         String aStr = Keyboard.inputString;
         grabFromStringUntil(aStr, '=');
         aStr.trim();
-        D_println(aStr);
+        DV_println(aStr);
         displayText = aStr;
         Events.push(evNewStatus);
       }
@@ -666,14 +666,14 @@ void loop() {
         grabFromStringUntil(aStr, '=');
         String ssid = grabFromStringUntil(aStr, ',');
         ssid.trim();
-        D_println(ssid);
+        DV_println(ssid);
         if (ssid != "") {
           String pass = aStr;
           pass.trim();
-          D_println(pass);
+          DV_println(pass);
           bool result = WiFi.begin(ssid, pass);
           Serial.print(F("WiFi begin "));
-          D1_println(result);
+          V_println(result);
         }
       }
 
@@ -682,7 +682,7 @@ void loop() {
         Events.push(doReset);
       }
       if (Keyboard.inputString.equals(F("FREE"))) {
-        D_println(Events.freeRam());
+        DV_println(Events.freeRam());
         String aStr = F("FREE=");
         aStr += String(Events.freeRam());
         aStr += F(",APP=");
@@ -693,20 +693,20 @@ void loop() {
         String aStr = F(" CPU=");
         aStr += String(Events._percentCPU);
         myUdp.broadcastInfo(aStr);
-        D_print(aStr)
+        DV_print(aStr)
       }
 
       /*
-      if (Keyboard.inputString.equals("S")) {
+        if (Keyboard.inputString.equals("S")) {
         sleepOk = !sleepOk;
-        D_println(sleepOk);
-      }
-      if (Keyboard.inputString.equals(F("RAZCONF"))) {
+        DV_println(sleepOk);
+        }
+        if (Keyboard.inputString.equals(F("RAZCONF"))) {
         Serial.println(F("RAZCONF this will reset"));
         eraseConfig();
         delay(1000);
         Events.reset();
-      }
+        }
       */
   }
 }
@@ -748,7 +748,7 @@ void beep(const uint16_t frequence, const uint16_t duree) {
 }
 
 
-
+/*
 String niceDisplayTime(const time_t time, bool full) {
 
   String txt;
@@ -781,7 +781,7 @@ String niceDisplayTime(const time_t time, bool full) {
   txt += Digit2_str(second(time));
   return txt;
 }
-
+*/
 // helper to save and restore RTC_DATA
 // this is ugly but we need this to get correct sizeof()
 #define RTC_DATA(x) (uint32_t*)&x, sizeof(x)

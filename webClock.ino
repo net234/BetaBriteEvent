@@ -36,7 +36,7 @@ time_t getWebTime() {
   // we got an answer the date is in the header so we grab it
   String headerDate = http.header(headerKeys[0]);
   // Check the header should be a 29 char texte like this 'Mon, 24 May 2021 13:57:04 GMT'
-  D_println(headerDate);
+  DV_println(headerDate);
   if (!headerDate.endsWith(" GMT") || headerDate.length() != 29) {
     Serial.println(F("reponse invalide :("));
     http.end();   //Close connection
@@ -66,11 +66,11 @@ time_t getWebTime() {
   dateStruct.Day = headerDate.substring(5, 7).toInt();
 
   time_t serverTS = makeTime(dateStruct) - (timeZone * 3600); // change to local time
-  D_println(timeZone);
+  DV_println(timeZone);
   int deltaTime = serverTS - currentTime;
-  D1_println(deltaTime);
-  D_println(niceDisplayTime(serverTS));
- // D_println(helperFreeRam());
+  V_println(deltaTime);
+  DV_println(niceDisplayTime(serverTS,false));
+ // DV_println(helperFreeRam());
   // we dont use the payload here
   //String payload = http.getString();   //Get the request response payload
   //Serial.println(payload);             //Print the response payload
