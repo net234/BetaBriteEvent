@@ -39,7 +39,7 @@
 static_assert(sizeof(time_t) == 8, "This version works with time_t 64bit  move to ESP8266 kernel 3.0 or more");
 
 #define APP_NAME "BetaBriteEvent V1.4"
-
+#include <ArduinoOTA.h>
 
 //
 /* Evenements du Manager (voir EventsManager.h)
@@ -70,6 +70,8 @@ enum tUserEventCode {
   evEraseUdp,
   evPostInit,
   evLcdRefresh,
+  evStartOta,
+  evStopOta,
   // evenement action
   doReset,
 };
@@ -251,22 +253,53 @@ void setup() {
 //String niceDisplayTime(const time_t time, bool full = false);
 
 void loop() {
+  ArduinoOTA.handle();
   Events.get(sleepOk);
   Events.handle();
   switch (Events.code) {
-    //    case evNill:
-    //      break;
+      //    case evNill:
+      //      break;
 
 
     case evInit:
       Serial.println("Init");
       Events.delayedPushMilli(10000, evPostInit);
+      Events.delayedPushMilli(5000, evStartOta);
+      myUdp.broadcastInfo("Boot");
       break;
 
     case evPostInit:
       postInit = true;
       Events.push(evNewStatus);
       break;
+    case evStopOta:
+      Serial.println("Stop OTA");
+      myUdp.broadcastInfo("Stop OTA");
+      ArduinoOTA.end();
+      //writeHisto(F("Stop OTA"), nodeName);
+      // but restart MDNS
+      //MDNS.begin(nodeName);
+      //MDNS.addService("http", "tcp", 80);
+      break;
+
+    case evStartOta:
+      {
+        // start OTA
+        String deviceName = nodeName;  // "ESP_";
+
+        ArduinoOTA.setHostname(deviceName.c_str());
+        ArduinoOTA.begin(true);                               //MDNS is handled in main loop
+        Events.delayedPushMilli(1000L * 15 * 60, evStopOta);  // stop OTA dans 15 Min
+
+        //MDNS.update();
+        Serial.print("OTA on '");
+        Serial.print(deviceName);
+        Serial.println("' started.");
+        Serial.print("SSID:");
+        Serial.println(WiFi.SSID());
+        myUdp.broadcastInfo("start OTA");
+        //end start OTA
+      }
 
     case ev24H:
       {
@@ -338,10 +371,6 @@ void loop() {
         if (lastMinute != minute()) {
           lastMinute = minute();
           Events.push(evNewStatus);
-
-
-
-          if (WiFiConnected) myUdp.broadcast("{\"init\":\"afficheur\"}");
         }
 
         // If we are not connected we warn the user every 30 seconds that we need to update credential
@@ -359,7 +388,7 @@ void loop() {
         if (Events.ext == evxUdpRxMessage) {
           DTV_print("from", myUdp.rxFrom);
           DTV_println("got an Event UDP", myUdp.rxJson);
-          
+
 
           if (lcdOk) {
             lcd.setCursor(0, 2);
@@ -485,14 +514,14 @@ void loop() {
                         " Infra Ok    ");
         } else {
           if (!WiFiConnected) aMessage += F("\x1c"
-                                              "1"
-                                              " WIFI Err ");
+                                            "1"
+                                            " WIFI Err ");
           if (!WWWOk) aMessage += F("\x1c"
-                                      "1"
-                                      " WWW Err ");
+                                    "1"
+                                    " WWW Err ");
           if (!APIOk) aMessage += F("\x1c"
-                                      "1"
-                                      " API Err ");
+                                    "1"
+                                    " API Err ");
         }
 
         JSONVar keys = temperatures.keys();
@@ -515,7 +544,10 @@ void loop() {
           aMessage += "  ";
         }
 
-        if (postInit) betaBriteWrite(aMessage);
+        if (postInit) {
+          betaBriteWrite(aMessage);
+          if (WiFiConnected) myUdp.broadcastInfo(F("TXT=")+lcdMessage);
+        }
         if (lcdOk) Events.delayedPushMilli(300, evLcdRefresh, 0);
       }
       break;
@@ -694,6 +726,10 @@ void loop() {
         aStr += String(Events._percentCPU);
         myUdp.broadcastInfo(aStr);
         DV_print(aStr)
+      }
+      if (Keyboard.inputString.equals("OTA")) {
+        Events.push(evStartOta);
+        T_println("Start OTA");
       }
 
       /*
