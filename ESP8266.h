@@ -11,7 +11,7 @@
 #define D1  5     //       I2C_SCL
 #define D2  4     //       I2C_SDA
 #define D3  0     //!FLASH    BEEP_PIN
-#define D4  2     //!LED2     PN532_POWER_PIN
+#define D4  2     //!LED2     Serial1
 
 #define D5  14    //!SPI_CLK    Entrée porte verouillée
 #define D6  12    //!SPI_MISO   GACHE_PIN
@@ -19,7 +19,7 @@
 #define D8  15    //!BOOT_STS            
 
 // #define BP0_PIN   D7                 //  High to Low = will wleep in, 5 minutes 
-#define LED0_PIN  LED_BUILTIN   //   By default Led0 is on LED_BUILTIN you can change it
+#define LED0_PIN  D0 //LED_BUILTIN   //   By default Led0 is on LED_BUILTIN you can change it
 
 #define I2C_SDA  D2
 #define I2C_SCL  D1
