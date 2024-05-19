@@ -31,15 +31,17 @@
     _ ajout d'un afficheur LCD 4x 20
     - creation d'un module evenementiel udpEvent pour une gestion des messgae en UDP
    V1.3  (16/02/2024)
+    V2.0  (19/05/2024)
+    -passage en mode bNode V2.0
 
 *************************************************/
 
 // Definition des constantes pour les IO
 #include "ESP8266.h"
-static_assert(sizeof(time_t) == 8, "This version works with time_t 64bit  move to ESP8266 kernel 3.0 or more");
+//static_assert(sizeof(time_t) == 8, "This version works with time_t 64bit  move to ESP8266 kernel 3.0 or more");
 
-#define APP_NAME "BetaBriteEvent V1.4"
-#include <ArduinoOTA.h>
+#define APP_NAME "BetaBriteEvent V2.0"
+
 
 //
 /* Evenements du Manager (voir EventsManager.h)
@@ -54,7 +56,7 @@ static_assert(sizeof(time_t) == 8, "This version works with time_t 64bit  move t
 */
 
 
-#define NOT_A_DATE_YEAR 2000
+//#define NOT_A_DATE_YEAR 2000
 
 // Liste des evenements specifique a ce projet
 
@@ -63,15 +65,13 @@ enum tUserEventCode {
   // evenement utilisateurs
   evBP0 = 100,  // low = low power allowed
   evLed0,
-  evUdp,  // Trame UDP avec un evenement
+  //evUdp,  // Trame UDP avec un evenement
   evCheckWWW,
   evCheckAPI,
   evNewStatus,
   evEraseUdp,
-  evPostInit,
   evLcdRefresh,
-  evStartOta,
-  evStopOta,
+  evHttp,  //demande d'api local
   // evenement action
   doReset,
 };
@@ -79,21 +79,31 @@ enum tUserEventCode {
 #define checkWWW_DELAY (60 * 60 * 1000L)  // toute les heures
 #define checkAPI_DELAY (5 * 60 * 1000L)   // toute les 5 minutes
 
-#define HTTP_API "http://nimux.frdev.com/net234/api.php"  // URI du serveur api local
+//#define HTTP_API "http://nimux.frdev.com/net234/api.php"  // URI du serveur api local
 
 
-// instance betaEvent
-
-//  une instance "Events" avec un poussoir "BP0" une LED "Led0" un clavier "Keyboard"
-//  MyBP0 genere un evenement evBP0 a chaque pression le poussoir connecté sur pinBP0
+/// bHub.h  installe :
+//  - une instance "Events" pour gere les evenements
+// poussoir "BP0"
+// une LED "Led0"
+// un clavier "Keyboard"
+// un debugger "Debug"
+//  MyBP0 genere un evenement evBP0 a chaque pression le poussoir connecté sur D2
 //  Led0 genere un evenement evLed0 a chaque clignotement de la led precablée sur la platine
 //  Keyboard genere un evenement evChar a char caractere recu et un evenement evString a chaque ligne recue
-//  Debug permet sur reception d'un "T" sur l'entrée Serial d'afficher les infos de charge du CPU
+//  MyDebug permet sur reception d'un "T" sur l'entrée Serial d'afficher les infos de charge du CPU
+// bHub.h will create and initiate following global instances
+//  Events:  eventsManager
+//  bHub:    evHandlerbNode
+//  Wifi:    standard Wifi ESP
+//  bNodeFS: alias of LittleFS
 
-//#define DEFAULT_PIN
-// les sortie pour la led et le poussoir sont definis dans esp8266.h avec BP0_PIN  et LED0_PIN
 #define DEBUG_ON
-#include <BetaEvents32.h>
+#include "ESP8266.H"  // assignation des pin a l'aide constant #define type XXXXXX_PIN
+#include <bHub.h>
+
+
+
 
 //  Info I2C
 
@@ -102,41 +112,13 @@ enum tUserEventCode {
 #include <Wire.h>  // Gestion I2C
 
 // Instance LCD
-#include <LiquidCrystal_PCF8574.h>
+#include "LiquidCrystal_PCF8574.h"
 LiquidCrystal_PCF8574 lcd(LCD_I2CADR);  // set the LCD address
 
 
 
 
-// littleFS
-#include <LittleFS.h>  //Include File System Headers
-#define MyLittleFS LittleFS
 
-
-//WiFI
-#include <ESP8266WiFi.h>
-#include <ESP8266HTTPClient.h>  // acces web API
-#include <Arduino_JSON.h>
-
-
-// rtc memory to keep date
-//struct __attribute__((packed))
-struct {
-  // all these values are keep in RTC RAM
-  uint8_t crc8;            // CRC for savedRTCmemory
-  time_t actualTimestamp;  // time stamp restored on next boot Should be update in the loop() with setActualTimestamp
-} savedRTCmemory;
-
-
-
-
-// Variable d'application locale
-String nodeName = "NODE_NAME";  // nom de  la device (a configurer avec NODE=)"
-bool WiFiConnected = false;
-
-time_t currentTime;
-int8_t timeZone = -2;  //les heures sont toutes en localtimes
-bool configOk = true;  // global used by getConfig...
 
 String messageUDP;  //trame UDP
 String openDoors;
@@ -151,35 +133,21 @@ bool sleepOk = true;
 JSONVar temperatures;
 String displayText;
 String lcdMessage;
-
+String mailSendTo;
 // gestion de l'ecran
 
 bool lcdOk = false;
-
-// init UDP
-#include "evHandlerUdp.h"
-const unsigned int localUdpPort = 23423;  // local port to listen on
-evHandlerUdp myUdp(evUdp, localUdpPort, nodeName);
 
 
 
 
 void setup() {
-  enableWiFiAtBootTime();  // obligatoire pour lekernel ESP > 3.0
-  Serial.begin(115200);
-  Serial1.begin(2400, SERIAL_7E1);  // afficheur betabrite sur serial1 TX (D4)
+  Events.begin();
   Serial.println(F("\r\n\n" APP_NAME));
 
-  // Start instance
-  Events.begin();
+  Serial1.begin(2400, SERIAL_7E1);  // afficheur betabrite sur serial1 TX (D4)
 
-  DV_println(WiFi.getMode());
-  // normaly not needed
-  if (WiFi.getMode() != WIFI_STA) {
-    Serial.println(F("!!! Force WiFi to STA mode !!!"));
-    WiFi.mode(WIFI_STA);
-    //WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  }
+
 
   //  message.reserve(200);
   messageUDP.reserve(100);
@@ -190,37 +158,30 @@ void setup() {
   //  Serial.println(F("Bonjour ...."));
 
 
-  // System de fichier
-  if (!MyLittleFS.begin()) {
-    Serial.println(F("erreur MyLittleFS"));
-    fatalError(3);
-  }
 
-  // recuperation de l'heure dans la static ram de l'ESP
-  if (!getRTCMemory()) {
-    savedRTCmemory.actualTimestamp = 0;
-  }
-  // little trick to leave timeStatus to timeNotSet
-  // TODO: see with https://github.com/PaulStoffregen/Time to find a way to say timeNeedsSync
-  adjustTime(savedRTCmemory.actualTimestamp);
-  currentTime = savedRTCmemory.actualTimestamp;
-
+  bool configErr = false;
   // recuperation de la config dans config.json
-  nodeName = jobGetConfigStr(F("nodename"));
+  String nodeName = jobGetConfigStr(F("nodename"));
   if (nodeName == "") {
     Serial.println(F("!!! Configurer le nom de la device avec 'NODE=nodename' !!!"));
-    //   configErr = true;
+    configErr = true;
+    nodeName = "bNode_";
+    nodeName += WiFi.macAddress().substring(12, 14);
+    nodeName += WiFi.macAddress().substring(15, 17);
+
+
   }
+  bHub.nodeName = nodeName;
   DV_println(nodeName);
 
   // recuperation de la timezone dans la config
-  timeZone = jobGetConfigInt(F("timezone"));
-  if (!configOk) {
-    timeZone = -2;  // par defaut France hivers
-    jobSetConfigInt(F("timezone"), timeZone);
+  bHub.timeZone = jobGetConfigInt(F("timezone"));
+  if (!bHub.configOk) {
+    bHub.timeZone = 0;  // par defaut France hivers
+    //jobSetConfigInt(F("timezone"),   bHub.timeZone);
     Serial.println(F("!!! timezone !!!"));
   }
-  DV_println(timeZone);
+  DV_println(bHub.timeZone);
 
   //Init I2C
   Wire.begin(I2C_SDA, I2C_SCL);
@@ -229,7 +190,12 @@ void setup() {
   if (!checkI2C(LCD_I2CADR)) {
     Serial.println(F("No LCD detected"));
   }
-
+   mailSendTo = jobGetConfigStr(F("mailto"));
+  if (mailSendTo == "") {
+    Serial.println(F("!!! Configurer l'adresse pour le mail  'MAILTO=monAdresseMail' !!!"));
+    configErr = true;
+  }
+  DV_println(mailSendTo);
   // Init LCD
 
   lcd.begin(20, 4);  // initialize the lcd
@@ -241,69 +207,117 @@ void setup() {
 
 
   String message = F("Bonjour ...   ");
-  message += niceDisplayTime(currentTime, true);
+  message += niceDisplayTime(bHub.currentTime, true);
   betaBriteWrite(message);
 
   Serial.println("Bonjour ....");
   Serial.println("Tapez '?' pour avoir la liste des commandes");
 
-  DV_println(Events.freeRam());
+  DV_println(helperFreeRam());
 }
 
 //String niceDisplayTime(const time_t time, bool full = false);
 
 void loop() {
-  ArduinoOTA.handle();
+
   Events.get(sleepOk);
   Events.handle();
   switch (Events.code) {
-      //    case evNill:
-      //      break;
+    //    case evNill:
+    //      break;
+
+    /*
+        case evInit:
+          Serial.println("Init");
+          Events.delayedPushMilli(10000, evPostInit);
+          Events.delayedPushMilli(5000, evStartOta);
+          myUdp.broadcastInfo("Boot");
+          break;
 
 
+        case evStopOta:
+          Serial.println("Stop OTA");
+          myUdp.broadcastInfo("Stop OTA");
+          ArduinoOTA.end();
+          //writeHisto(F("Stop OTA"), nodeName);
+          // but restart MDNS
+          //MDNS.begin(nodeName);
+          //MDNS.addService("http", "tcp", 80);
+          break;
+
+        case evStartOta:
+          {
+            // start OTA
+            String deviceName = nodeName;  // "ESP_";
+
+            ArduinoOTA.setHostname(deviceName.c_str());
+            ArduinoOTA.begin(true);                               //MDNS is handled in main loop
+            Events.delayedPushMilli(1000L * 15 * 60, evStopOta);  // stop OTA dans 15 Min
+
+            //MDNS.update();
+            Serial.print("OTA on '");
+            Serial.print(deviceName);
+            Serial.println("' started.");
+            Serial.print("SSID:");
+            Serial.println(WiFi.SSID());
+            myUdp.broadcastInfo("start OTA");
+            //end start OTA
+          }
+    */
     case evInit:
-      Serial.println("Init");
-      Events.delayedPushMilli(10000, evPostInit);
-      Events.delayedPushMilli(5000, evStartOta);
-      myUdp.broadcastInfo("Boot");
+      {
+        Serial.println("Init");
+        String aStr = bHub.nodeName;
+
+        aStr += F(" " APP_NAME);
+
+        writeHisto((bHub.coldBoot) ? F("ColdBoot") : F("Boot"), aStr);
+
+        jobUpdateLed0();
+      }
       break;
 
     case evPostInit:
       postInit = true;
+
+      //bHubUdp.broadcastInfo("InitDone");
+      T_println("PostInit done");
+
+
       Events.push(evNewStatus);
-      break;
-    case evStopOta:
-      Serial.println("Stop OTA");
-      myUdp.broadcastInfo("Stop OTA");
-      ArduinoOTA.end();
-      //writeHisto(F("Stop OTA"), nodeName);
-      // but restart MDNS
-      //MDNS.begin(nodeName);
-      //MDNS.addService("http", "tcp", 80);
+      jobUpdateLed0();
       break;
 
-    case evStartOta:
-      {
-        // start OTA
-        String deviceName = nodeName;  // "ESP_";
+    case evTimeMasterGrab:
+    case evTimeMasterSyncr:
+      jobUpdateLed0();  //synchro de la led de vie
 
-        ArduinoOTA.setHostname(deviceName.c_str());
-        ArduinoOTA.begin(true);                               //MDNS is handled in main loop
-        Events.delayedPushMilli(1000L * 15 * 60, evStopOta);  // stop OTA dans 15 Min
+      break;
 
-        //MDNS.update();
-        Serial.print("OTA on '");
-        Serial.print(deviceName);
-        Serial.println("' started.");
-        Serial.print("SSID:");
-        Serial.println(WiFi.SSID());
-        myUdp.broadcastInfo("start OTA");
-        //end start OTA
+
+    case evOta:
+      switch (Events.ext) {
+        case evxOff:
+
+
+          DT_println("Stop OTA");
+
+          break;
+
+        case evxOn:
+          {
+
+            DT_println("Start OTA");
+          }
+          break;
       }
+      break;
+
+
 
     case ev24H:
       {
-        String newDateTime = niceDisplayTime(currentTime, true);
+        String newDateTime = niceDisplayTime(bHub.currentTime, true);
         DV_println(newDateTime);
       }
       break;
@@ -313,40 +327,6 @@ void loop() {
     case ev1Hz:
       {
 
-        // check for connection to local WiFi  1 fois par seconde c'est suffisant
-        static uint8_t oldWiFiStatus = 99;
-        uint8_t WiFiStatus = WiFi.status();
-        if (oldWiFiStatus != WiFiStatus) {
-          oldWiFiStatus = WiFiStatus;
-          DV_println(WiFiStatus);
-          //    WL_IDLE_STATUS      = 0,
-          //    WL_NO_SSID_AVAIL    = 1,
-          //    WL_SCAN_COMPLETED   = 2,
-          //    WL_CONNECTED        = 3,
-          //    WL_CONNECT_FAILED   = 4,
-          //    WL_CONNECTION_LOST  = 5,
-          //    WL_DISCONNECTED     = 6
-          WiFiConnected = (WiFiStatus == WL_CONNECTED);
-          static bool wasConnected = false;
-          if (wasConnected != WiFiConnected) {
-            wasConnected = WiFiConnected;
-            Led0.setFrequence(WiFiConnected ? 1 : 2);
-            if (WiFiConnected) {
-              setSyncProvider(getWebTime);
-              setSyncInterval(6 * 3600);
-              // lisen UDP 23423
-              Serial.println("Listen broadcast");
-              myUdp.begin();
-              Events.delayedPushMilli(5000, evCheckWWW);
-              Events.delayedPushMilli(7000, evCheckAPI);
-
-            } else {
-              WWWOk = false;
-            }
-            Events.push(evNewStatus);
-            DV_println(WiFiConnected);
-          }
-        }
 
         // check lcd
         if (lcdOk != checkI2C(LCD_I2CADR)) {
@@ -356,17 +336,12 @@ void loop() {
         if (lcdOk and postInit) {
           lcd.setCursor(0, 0);
           lcd.println(APP_NAME);
-          String aStr = niceDisplayTime(currentTime, true);
+          String aStr = niceDisplayTime(bHub.currentTime, true);
           lcd.println(aStr);
         }
 
 
 
-
-        // Save current time in RTC memory (not erased by a reset)
-        currentTime = now();
-        savedRTCmemory.actualTimestamp = currentTime;  // save time in RTC memory
-        saveRTCmemory();
         static uint8_t lastMinute = minute();
         if (lastMinute != minute()) {
           lastMinute = minute();
@@ -374,7 +349,7 @@ void loop() {
         }
 
         // If we are not connected we warn the user every 30 seconds that we need to update credential
-        if (!WiFiConnected && second() % 30 == 15) {
+        if (!bHub.connected && second() % 30 == 15) {
           // every 30 sec
           Serial.print(F("module non connecté au Wifi local "));
           DV_println(WiFi.SSID());
@@ -383,94 +358,95 @@ void loop() {
       }
 
       break;
-    case evUdp:
-      {
-        if (Events.ext == evxUdpRxMessage) {
-          DTV_print("from", myUdp.rxFrom);
-          DTV_println("got an Event UDP", myUdp.rxJson);
+    /*
+        case evUdp:
+          {
+            if (Events.ext == evxUdpRxMessage) {
+              DTV_print("from", myUdp.rxFrom);
+              DTV_println("got an Event UDP", myUdp.rxJson);
 
 
-          if (lcdOk) {
-            lcd.setCursor(0, 2);
-            //lcd.print(myUdp.rxHeader);
-            //lcd.print(' ');
-            lcd.println(myUdp.rxFrom);
-            lcd.print(myUdp.rxJson);
-          }
-          if (!myUdp.bcast) return;
-          JSONVar jsonData = JSON.parse(myUdp.rxJson);
-          // temperature
-          JSONVar rxJson2 = jsonData["temperature"];
-          if (JSON.typeof(rxJson2).equals("object")) {
-            String aName = rxJson2.keys()[0];
-            //DV_println(aName);
-            double aValue = rxJson2[aName];
-            //DV_println(aValue);
-            temperatures[aName] = aValue;
-            DV_println(temperatures);
-            return;
-          }
-          //CMD
-          rxJson2 = jsonData["CMD"];
-          if (JSON.typeof(rxJson2).equals("object")) {
-            String dest = rxJson2.keys()[0];
-            // Les CMD acceptée doivent etre adressé a ce module
-            if (dest.equals("ALL") or (dest.length() > 3 and nodeName.startsWith(dest))) {
-              String aCmd = rxJson2[dest];
-              aCmd.trim();
-              DV_println(aCmd);
-              if (aCmd.startsWith(F("NODE=")) and !nodeName.equals(dest)) break;  // NODE= not allowed on aliases
-              if (aCmd.length()) Keyboard.setInputString(aCmd);
-            } else {
-              DTV_println("CMD not for me.", dest);
-            }
-          }
+              if (lcdOk) {
+                lcd.setCursor(0, 2);
+                //lcd.print(myUdp.rxHeader);
+                //lcd.print(' ');
+                lcd.println(myUdp.rxFrom);
+                lcd.print(myUdp.rxJson);
+              }
+              if (!myUdp.bcast) return;
+              JSONVar jsonData = JSON.parse(myUdp.rxJson);
+              // temperature
+              JSONVar rxJson2 = jsonData["temperature"];
+              if (JSON.typeof(rxJson2).equals("object")) {
+                String aName = rxJson2.keys()[0];
+                //DV_println(aName);
+                double aValue = rxJson2[aName];
+                //DV_println(aValue);
+                temperatures[aName] = aValue;
+                DV_println(temperatures);
+                return;
+              }
+              //CMD
+              rxJson2 = jsonData["CMD"];
+              if (JSON.typeof(rxJson2).equals("object")) {
+                String dest = rxJson2.keys()[0];
+                // Les CMD acceptée doivent etre adressé a ce module
+                if (dest.equals("ALL") or (dest.length() > 3 and nodeName.startsWith(dest))) {
+                  String aCmd = rxJson2[dest];
+                  aCmd.trim();
+                  DV_println(aCmd);
+                  if (aCmd.startsWith(F("NODE=")) and !nodeName.equals(dest)) break;  // NODE= not allowed on aliases
+                  if (aCmd.length()) Keyboard.setInputString(aCmd);
+                } else {
+                  DTV_println("CMD not for me.", dest);
+                }
+              }
 
 
-          String action = (const char*)jsonData["action"];
-          DV_println(action);
-          if (action.equals(F("badge"))) {
-            //eceived packet UDPmyUdp.rxHeader => 'EVENT', myUdp.rxNode => 'Betaporte_2B', myUdp.rxJson => '{"action":"badge","userid":"Test_5"}'
+              String action = (const char*)jsonData["action"];
+              DV_println(action);
+              if (action.equals(F("badge"))) {
+                //eceived packet UDPmyUdp.rxHeader => 'EVENT', myUdp.rxNode => 'Betaporte_2B', myUdp.rxJson => '{"action":"badge","userid":"Test_5"}'
 
-            String aStr = myUdp.rxFrom;
+                String aStr = myUdp.rxFrom;
 
-            aStr += " : ";
-            aStr += (const char*)jsonData["userid"];  //
-            DV_println(aStr);
+                aStr += " : ";
+                aStr += (const char*)jsonData["userid"];  //
+                DV_println(aStr);
 
-            if (messageUDP.indexOf(aStr) < 0) {
-              messageUDP += "    ";
-              messageUDP += aStr;
-            }
-            Events.delayedPushMilli(500, evNewStatus);
-            Events.delayedPushMilli(5 * 60 * 1000, evEraseUdp);
-            return;
-          }
+                if (messageUDP.indexOf(aStr) < 0) {
+                  messageUDP += "    ";
+                  messageUDP += aStr;
+                }
+                Events.delayedPushMilli(500, evNewStatus);
+                Events.delayedPushMilli(5 * 60 * 1000, evEraseUdp);
+                return;
+              }
 
 
 
-          if (action.equals(F("porte"))) {
-            //Received packet UDPmyUdp.bcast => '1', myUdp.rxHeader => 'EVENT', myUdp.rxNode => 'Betaporte_2', myUdp.rxJson => '{"action":"porte","close":false}'
-            bool closed = (bool)jsonData["close"];
-            String aStr = myUdp.rxFrom + ' ';
-            if (closed) {
-              openDoors.replace(aStr, "");
-              //openDoors.trim();
-            } else {
-              if (openDoors.indexOf(aStr) < 0) {
+              if (action.equals(F("porte"))) {
+                //Received packet UDPmyUdp.bcast => '1', myUdp.rxHeader => 'EVENT', myUdp.rxNode => 'Betaporte_2', myUdp.rxJson => '{"action":"porte","close":false}'
+                bool closed = (bool)jsonData["close"];
+                String aStr = myUdp.rxFrom + ' ';
+                if (closed) {
+                  openDoors.replace(aStr, "");
+                  //openDoors.trim();
+                } else {
+                  if (openDoors.indexOf(aStr) < 0) {
 
-                openDoors += aStr;
+                    openDoors += aStr;
+                  }
+                }
+
+                Events.delayedPushMilli(500, evNewStatus);
+                //Events.delayedPushMilli(3 * 60 * 1000, evEraseUdp);
+                return;
               }
             }
-
-            Events.delayedPushMilli(500, evNewStatus);
-            //Events.delayedPushMilli(3 * 60 * 1000, evEraseUdp);
-            return;
           }
-        }
-      }
-      break;
-
+          break;
+    */
 
     /*
       1CH+“1”(31H)=Red
@@ -505,23 +481,23 @@ void loop() {
         }
         aMessage += F("\x1c"
                       "3");
-        aMessage += niceDisplayTime(currentTime, true);
+        aMessage += niceDisplayTime(bHub.currentTime, true);
         aMessage = aMessage.substring(0, aMessage.length() - 3);
 
-        if (WiFiConnected && WWWOk && APIOk) {
+        if (bHub.connected && WWWOk && APIOk) {
           aMessage += F("\x1c"
                         "2"
                         " Infra Ok    ");
         } else {
-          if (!WiFiConnected) aMessage += F("\x1c"
-                                            "1"
-                                            " WIFI Err ");
+          if (!bHub.connected) aMessage += F("\x1c"
+                                               "1"
+                                               " WIFI Err ");
           if (!WWWOk) aMessage += F("\x1c"
-                                    "1"
-                                    " WWW Err ");
+                                      "1"
+                                      " WWW Err ");
           if (!APIOk) aMessage += F("\x1c"
-                                    "1"
-                                    " API Err ");
+                                      "1"
+                                      " API Err ");
         }
 
         JSONVar keys = temperatures.keys();
@@ -546,9 +522,9 @@ void loop() {
 
         if (postInit) {
           betaBriteWrite(aMessage);
-          if (WiFiConnected) myUdp.broadcastInfo(F("TXT=")+lcdMessage);
+          if (bHub.connected) bHubUdp.broadcastInfo(F("TXT=") + lcdMessage);
         }
-        if (lcdOk) Events.delayedPushMilli(300, evLcdRefresh, 0);
+        if (lcdOk) Events.delayedPushMillis(300, evLcdRefresh, 0);
       }
       break;
 
@@ -556,7 +532,7 @@ void loop() {
       {
         if (!lcdOk) break;
 
-        uint displayStep = Events.intExt;
+        uint displayStep = Events.ext;
         //DV_print(displayStep);
         lcd.setCursor(0, 2);
         // lcd.print(LCD_CLREOL "\r\n" LCD_CLREOL);
@@ -571,7 +547,7 @@ void loop() {
         displayStep++;
 
         if (displayStep > lcdMessage.length() - 10) displayStep = 0;
-        Events.delayedPushMilli(500, evLcdRefresh, displayStep);
+        Events.delayedPushMillis(500, evLcdRefresh, displayStep);
       }
       break;
 
@@ -582,58 +558,114 @@ void loop() {
       }
       break;
 
-
     case evCheckWWW:
       Serial.println("evCheckWWW");
-      if (WiFiConnected) {
-        if (WWWOk != (getWebTime() > 0)) {
+      if (bHub.connected) {
+        if (WWWOk != checkFAI()) {
           WWWOk = !WWWOk;
           DV_println(WWWOk);
-          Events.delayedPushMilli(1000, evNewStatus);
+          writeHisto(WWWOk ? F("WWW Ok") : F("WWW Err"), "checkFAI");
+          jobUpdateLed0();
+          if (WWWOk) {
+            Serial.println("send a mail");
+            bool sendOk = sendHistoTo(mailSendTo);
+            if (sendOk) {
+              //eraseHisto();
+              writeHisto(F("Mail send ok"), mailSendTo);
+            } else {
+              writeHisto(F("Mail erreur"), mailSendTo);
+            }
+          }
         }
-        Events.delayedPushMilli(checkWWW_DELAY, evCheckWWW);
+        Events.delayedPushMillis(checkWWW_DELAY, evCheckWWW);
       }
       break;
+    //    case evCheckWWW:
+    //      Serial.println("evCheckWWW");
+    //      if (WiFiConnected) {
+    //        if (WWWOk != (getWebTime() > 0)) {
+    //          WWWOk = !WWWOk;
+    //          DV_println(WWWOk);
+    //          Events.delayedPushMilli(1000, evNewStatus);
+    //        }
+    //        Events.delayedPushMilli(checkWWW_DELAY, evCheckWWW);
+    //      }
+    //      break;
+
 
     case evCheckAPI:
       {
         Serial.println("evCheckAPI");
-        if (WiFiConnected) {
-          JSONVar jsonData;
-          jsonData["timeZone"] = timeZone;
-          jsonData["timestamp"] = (double)currentTime;
-          //         jsonData["sonde1"] = sonde1;
-          //         jsonData["sonde2"] = sonde2;
-          String jsonStr = JSON.stringify(jsonData);
-          if (APIOk != dialWithPHP(nodeName, "timezone", jsonStr)) {
-            APIOk = !APIOk;
-            DV_println(APIOk);
-            Events.delayedPushMilli(1000, evNewStatus);
-            //           writeHisto( APIOk ? F("API Ok") : F("API Err"), "magnus2.frdev" );
-          }
-          if (APIOk) {
-            jsonData = JSON.parse(jsonStr);
-            time_t aTimeZone = (const double)jsonData["timezone"];
-            DV_println(aTimeZone);
-            if (aTimeZone != timeZone) {
-              //             writeHisto( F("Old TimeZone"), String(timeZone) );
-              timeZone = aTimeZone;
-              jobSetConfigInt("timezone", timeZone);
-              // force recalculation of time
-              setSyncProvider(getWebTime);
-              currentTime = now();
-              //            writeHisto( F("New TimeZone"), String(timeZone) );
-            }
+        if (!bHub.connected) break;
+        JSONVar jsonData = bHub.localDevices;
+        jsonData["timeZone"] = bHub.timeZone;
+        jsonData["timestamp"] = (double)bHub.currentTime;
+
+        String jsonStr = JSON.stringify(jsonData);
+        if (APIOk != dialWithPHP(bHub.nodeName, "timezone", jsonStr)) {
+          APIOk = !APIOk;
+          DV_println(APIOk);
+          writeHisto(APIOk ? F("API Ok") : F("API Err"), jobGetConfigStr("API"));
+          jobUpdateLed0();
+        }
+        if (APIOk) {
+          jsonData = JSON.parse(jsonStr);
+          time_t aTimeZone = (double)jsonData["timezone"];
+          DV_println(aTimeZone);
+          if (bHub.timeZone != aTimeZone) {
+            String aStr = String(bHub.timeZone);
+            aStr += " -> ";
+            aStr += String(aTimeZone);
+            writeHisto(F("Wrong TimeZone"), aStr);
+            //  bHub.timeZone = aTimeZone;
+            //jobSetConfigInt("timezone",   bHub.timeZone);
+            // force recalculation of time
+            //setSyncProvider(getWWWTime);
+            //  bHub.currentTime = now();
           }
         }
-        Events.delayedPushMilli(checkAPI_DELAY, evCheckAPI);
+        Events.delayedPushMillis(checkAPI_DELAY, evCheckAPI);
       }
       break;
+    //    case evCheckAPI:
+    //      {
+    //        Serial.println("evCheckAPI");
+    //        if (WiFiConnected) {
+    //          JSONVar jsonData;
+    //          jsonData["timeZone"] = timeZone;
+    //          jsonData["timestamp"] = (double)currentTime;
+    //          //         jsonData["sonde1"] = sonde1;
+    //          //         jsonData["sonde2"] = sonde2;
+    //          String jsonStr = JSON.stringify(jsonData);
+    //          if (APIOk != dialWithPHP(nodeName, "timezone", jsonStr)) {
+    //            APIOk = !APIOk;
+    //            DV_println(APIOk);
+    //            Events.delayedPushMilli(1000, evNewStatus);
+    //            //           writeHisto( APIOk ? F("API Ok") : F("API Err"), "magnus2.frdev" );
+    //          }
+    //          if (APIOk) {
+    //            jsonData = JSON.parse(jsonStr);
+    //            time_t aTimeZone = (const double)jsonData["timezone"];
+    //            DV_println(aTimeZone);
+    //            if (aTimeZone != timeZone) {
+    //              //             writeHisto( F("Old TimeZone"), String(timeZone) );
+    //              timeZone = aTimeZone;
+    //              jobSetConfigInt("timezone", timeZone);
+    //              // force recalculation of time
+    //              setSyncProvider(getWebTime);
+    //              currentTime = now();
+    //              //            writeHisto( F("New TimeZone"), String(timeZone) );
+    //            }
+    //          }
+    //        }
+    //        Events.delayedPushMilli(checkAPI_DELAY, evCheckAPI);
+    //      }
+    //     break;
 
 
 
     case doReset:
-      Events.reset();
+      helperReset();
       break;
 
 
@@ -673,11 +705,11 @@ void loop() {
         aStr.trim();
 
         if (aStr != "") {
-          nodeName = aStr;
-          DV_println(nodeName);
-          jobSetConfigStr(F("nodename"), nodeName);
+          bHub.nodeName = aStr;
+          DV_println(bHub.nodeName);
+          jobSetConfigStr(F("nodename"), bHub.nodeName);
           delay(1000);
-          Events.reset();
+          helperReset();
         }
       }
 
@@ -714,21 +746,21 @@ void loop() {
         Events.push(doReset);
       }
       if (Keyboard.inputString.equals(F("FREE"))) {
-        DV_println(Events.freeRam());
+        DV_println(helperFreeRam());
         String aStr = F("FREE=");
-        aStr += String(Events.freeRam());
+        aStr += String(helperFreeRam());
         aStr += F(",APP=");
         aStr += String(F(APP_NAME));
-        myUdp.broadcastInfo(aStr);
+        bHubUdp.broadcastInfo(aStr);
       }
       if (Keyboard.inputString.equals(F("INFO"))) {
         String aStr = F(" CPU=");
-        aStr += String(Events._percentCPU);
-        myUdp.broadcastInfo(aStr);
+        aStr += String(Events.getPercentCPU());
+        bHubUdp.broadcastInfo(aStr);
         DV_print(aStr)
       }
       if (Keyboard.inputString.equals("OTA")) {
-        Events.push(evStartOta);
+        Events.push(evOta, evxOn);
         T_println("Start OTA");
       }
 
@@ -775,7 +807,7 @@ void fatalError(const uint8_t error) {
     delay(500);
   }
   delay(2000);
-  Events.reset();
+  helperReset();
 }
 
 
@@ -785,7 +817,7 @@ void beep(const uint16_t frequence, const uint16_t duree) {
 
 
 /*
-String niceDisplayTime(const time_t time, bool full) {
+  String niceDisplayTime(const time_t time, bool full) {
 
   String txt;
   // we supose that time < NOT_A_DATE_YEAR is not a date
@@ -816,52 +848,5 @@ String niceDisplayTime(const time_t time, bool full) {
   txt += ':';
   txt += Digit2_str(second(time));
   return txt;
-}
-*/
-// helper to save and restore RTC_DATA
-// this is ugly but we need this to get correct sizeof()
-#define RTC_DATA(x) (uint32_t*)&x, sizeof(x)
-
-bool saveRTCmemory() {
-  setCrc8(&savedRTCmemory.crc8 + 1, sizeof(savedRTCmemory) - 1, savedRTCmemory.crc8);
-  //system_rtc_mem_read(64, &savedRTCmemory, sizeof(savedRTCmemory));
-  return ESP.rtcUserMemoryWrite(0, RTC_DATA(savedRTCmemory));
-}
-
-
-bool getRTCMemory() {
-  ESP.rtcUserMemoryRead(0, RTC_DATA(savedRTCmemory));
-  //Serial.print("CRC1="); Serial.println(getCrc8( (uint8_t*)&savedRTCmemory,sizeof(savedRTCmemory) ));
-  return (setCrc8(&savedRTCmemory.crc8 + 1, sizeof(savedRTCmemory) - 1, savedRTCmemory.crc8));
-}
-
-/////////////////////////////////////////////////////////////////////////
-//  crc 8 tool
-// https://www.nongnu.org/avr-libc/user-manual/group__util__crc.html
-
-
-//__attribute__((always_inline))
-inline uint8_t _crc8_ccitt_update(uint8_t crc, const uint8_t inData) {
-  uint8_t i;
-  crc ^= inData;
-
-  for (i = 0; i < 8; i++) {
-    if ((crc & 0x80) != 0) {
-      crc <<= 1;
-      crc ^= 0x07;
-    } else {
-      crc <<= 1;
-    }
   }
-  return crc;
-}
-
-bool setCrc8(const void* data, const uint16_t size, uint8_t& refCrc) {
-  uint8_t* dataPtr = (uint8_t*)data;
-  uint8_t crc = 0xFF;
-  for (uint8_t i = 0; i < size; i++) crc = _crc8_ccitt_update(crc, *(dataPtr++));
-  //Serial.print("CRC "); Serial.print(refCrc); Serial.print(" / "); Serial.println(crc);
-  bool result = (crc == refCrc);
-  refCrc = crc;
-  return result;
-}
+*/
