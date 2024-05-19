@@ -76,7 +76,7 @@ enum tUserEventCode {
   doReset,
 };
 
-#define checkWWW_DELAY (60 * 60 * 1000L)  // toute les heures
+#define checkWWW_DELAY (15 * 60 * 1000L)  // toute les 15 minutes
 #define checkAPI_DELAY (5 * 60 * 1000L)   // toute les 5 minutes
 
 //#define HTTP_API "http://nimux.frdev.com/net234/api.php"  // URI du serveur api local
@@ -130,7 +130,7 @@ bool WWWOk = false;
 bool APIOk = false;
 //int      currentMonth = -1;
 bool sleepOk = true;
-JSONVar temperatures;
+
 String displayText;
 String lcdMessage;
 String mailSendTo;
@@ -168,8 +168,6 @@ void setup() {
     nodeName = "bNode_";
     nodeName += WiFi.macAddress().substring(12, 14);
     nodeName += WiFi.macAddress().substring(15, 17);
-
-
   }
   bHub.nodeName = nodeName;
   DV_println(nodeName);
@@ -190,7 +188,7 @@ void setup() {
   if (!checkI2C(LCD_I2CADR)) {
     Serial.println(F("No LCD detected"));
   }
-   mailSendTo = jobGetConfigStr(F("mailto"));
+  mailSendTo = jobGetConfigStr(F("mailto"));
   if (mailSendTo == "") {
     Serial.println(F("!!! Configurer l'adresse pour le mail  'MAILTO=monAdresseMail' !!!"));
     configErr = true;
@@ -223,47 +221,6 @@ void loop() {
   Events.get(sleepOk);
   Events.handle();
   switch (Events.code) {
-    //    case evNill:
-    //      break;
-
-    /*
-        case evInit:
-          Serial.println("Init");
-          Events.delayedPushMilli(10000, evPostInit);
-          Events.delayedPushMilli(5000, evStartOta);
-          myUdp.broadcastInfo("Boot");
-          break;
-
-
-        case evStopOta:
-          Serial.println("Stop OTA");
-          myUdp.broadcastInfo("Stop OTA");
-          ArduinoOTA.end();
-          //writeHisto(F("Stop OTA"), nodeName);
-          // but restart MDNS
-          //MDNS.begin(nodeName);
-          //MDNS.addService("http", "tcp", 80);
-          break;
-
-        case evStartOta:
-          {
-            // start OTA
-            String deviceName = nodeName;  // "ESP_";
-
-            ArduinoOTA.setHostname(deviceName.c_str());
-            ArduinoOTA.begin(true);                               //MDNS is handled in main loop
-            Events.delayedPushMilli(1000L * 15 * 60, evStopOta);  // stop OTA dans 15 Min
-
-            //MDNS.update();
-            Serial.print("OTA on '");
-            Serial.print(deviceName);
-            Serial.println("' started.");
-            Serial.print("SSID:");
-            Serial.println(WiFi.SSID());
-            myUdp.broadcastInfo("start OTA");
-            //end start OTA
-          }
-    */
     case evInit:
       {
         Serial.println("Init");
@@ -274,8 +231,15 @@ void loop() {
         writeHisto((bHub.coldBoot) ? F("ColdBoot") : F("Boot"), aStr);
 
         jobUpdateLed0();
+        //retarde le post init de 10 seconde pour obtenis un check WWWW et un Check API avant l'affichage
+
+        Events.delayedPushSeconds(5, evCheckAPI);
+        Events.delayedPushSeconds(7, evCheckWWW);
+        Events.delayedPushSeconds(10, evPostInit);
       }
       break;
+
+
 
     case evPostInit:
       postInit = true;
@@ -295,24 +259,6 @@ void loop() {
       break;
 
 
-    case evOta:
-      switch (Events.ext) {
-        case evxOff:
-
-
-          DT_println("Stop OTA");
-
-          break;
-
-        case evxOn:
-          {
-
-            DT_println("Start OTA");
-          }
-          break;
-      }
-      break;
-
 
 
     case ev24H:
@@ -322,12 +268,8 @@ void loop() {
       }
       break;
 
-
-
     case ev1Hz:
       {
-
-
         // check lcd
         if (lcdOk != checkI2C(LCD_I2CADR)) {
           lcdOk = !lcdOk;
@@ -341,7 +283,7 @@ void loop() {
         }
 
 
-
+        //rafraichissement de l'affichage toute les minutes (affichage HH:MM)
         static uint8_t lastMinute = minute();
         if (lastMinute != minute()) {
           lastMinute = minute();
@@ -490,27 +432,55 @@ void loop() {
                         " Infra Ok    ");
         } else {
           if (!bHub.connected) aMessage += F("\x1c"
-                                               "1"
-                                               " WIFI Err ");
+                                             "1"
+                                             " WIFI Err ");
           if (!WWWOk) aMessage += F("\x1c"
-                                      "1"
-                                      " WWW Err ");
+                                    "1"
+                                    " WWW Err ");
           if (!APIOk) aMessage += F("\x1c"
-                                      "1"
-                                      " API Err ");
+                                    "1"
+                                    " API Err ");
+        }
+        // recuperation de toute les temperature
+        //liste les capteurs du type 'temperature'    api.Json?temperature listera les capteurs temperature
+        String temperatures = "";
+        int tempCnt = 0;
+        if (bHub.localDevices.hasOwnProperty("temperature")) {
+
+          JSONVar aJson = bHub.localDevices["temperature"];
+          JSONVar keys = aJson.keys();
+          for (int i = 0; i < keys.length(); i++) {
+            temperatures += (String)keys[i];
+            temperatures += ':';
+            temperatures += String((double)aJson[keys[i]], 1);
+            temperatures += "  ";
+            tempCnt++;
+          }
+        }
+        // recherche dans le mesh
+        JSONVar key0 = bHub.meshDevices.keys();
+        for (int i = 0; i < key0.length(); i++) {
+          String aKey0 = key0[i];
+          DV_println(aKey0);
+          JSONVar aJson = bHub.meshDevices[aKey0]["temperature"];
+          JSONVar keys = aJson.keys();
+          for (int i = 0; i < keys.length(); i++) {
+            temperatures += (String)keys[i];
+            temperatures += ':';
+            temperatures += String((double)aJson[keys[i]], 1);
+            temperatures += "  ";
+            tempCnt++;
+          }
         }
 
-        JSONVar keys = temperatures.keys();
-        if (keys.length() > 1) {
+        if (tempCnt) {
           aMessage += F(("\x1c"
                          "2"
-                         "   Temperatures "));
-          for (int i = 0; i < keys.length(); i++) {
-            aMessage += (String)keys[i];
-            aMessage += ':';
-            aMessage += String((double)temperatures[keys[i]], 1);
-            aMessage += "  ";
-          }
+                         "   Temperature"));
+          if (tempCnt > 1) aMessage += 's';
+          aMessage += ' ';
+          aMessage += temperatures;
+          
         }
         if (displayText.length()) {
           aMessage += F("\x1c"
@@ -566,7 +536,7 @@ void loop() {
           DV_println(WWWOk);
           writeHisto(WWWOk ? F("WWW Ok") : F("WWW Err"), "checkFAI");
           jobUpdateLed0();
-          if (WWWOk) {
+          if (WWWOk and postInit) {
             Serial.println("send a mail");
             bool sendOk = sendHistoTo(mailSendTo);
             if (sendOk) {
@@ -580,17 +550,6 @@ void loop() {
         Events.delayedPushMillis(checkWWW_DELAY, evCheckWWW);
       }
       break;
-    //    case evCheckWWW:
-    //      Serial.println("evCheckWWW");
-    //      if (WiFiConnected) {
-    //        if (WWWOk != (getWebTime() > 0)) {
-    //          WWWOk = !WWWOk;
-    //          DV_println(WWWOk);
-    //          Events.delayedPushMilli(1000, evNewStatus);
-    //        }
-    //        Events.delayedPushMilli(checkWWW_DELAY, evCheckWWW);
-    //      }
-    //      break;
 
 
     case evCheckAPI:
@@ -617,52 +576,11 @@ void loop() {
             aStr += " -> ";
             aStr += String(aTimeZone);
             writeHisto(F("Wrong TimeZone"), aStr);
-            //  bHub.timeZone = aTimeZone;
-            //jobSetConfigInt("timezone",   bHub.timeZone);
-            // force recalculation of time
-            //setSyncProvider(getWWWTime);
-            //  bHub.currentTime = now();
           }
         }
         Events.delayedPushMillis(checkAPI_DELAY, evCheckAPI);
       }
       break;
-    //    case evCheckAPI:
-    //      {
-    //        Serial.println("evCheckAPI");
-    //        if (WiFiConnected) {
-    //          JSONVar jsonData;
-    //          jsonData["timeZone"] = timeZone;
-    //          jsonData["timestamp"] = (double)currentTime;
-    //          //         jsonData["sonde1"] = sonde1;
-    //          //         jsonData["sonde2"] = sonde2;
-    //          String jsonStr = JSON.stringify(jsonData);
-    //          if (APIOk != dialWithPHP(nodeName, "timezone", jsonStr)) {
-    //            APIOk = !APIOk;
-    //            DV_println(APIOk);
-    //            Events.delayedPushMilli(1000, evNewStatus);
-    //            //           writeHisto( APIOk ? F("API Ok") : F("API Err"), "magnus2.frdev" );
-    //          }
-    //          if (APIOk) {
-    //            jsonData = JSON.parse(jsonStr);
-    //            time_t aTimeZone = (const double)jsonData["timezone"];
-    //            DV_println(aTimeZone);
-    //            if (aTimeZone != timeZone) {
-    //              //             writeHisto( F("Old TimeZone"), String(timeZone) );
-    //              timeZone = aTimeZone;
-    //              jobSetConfigInt("timezone", timeZone);
-    //              // force recalculation of time
-    //              setSyncProvider(getWebTime);
-    //              currentTime = now();
-    //              //            writeHisto( F("New TimeZone"), String(timeZone) );
-    //            }
-    //          }
-    //        }
-    //        Events.delayedPushMilli(checkAPI_DELAY, evCheckAPI);
-    //      }
-    //     break;
-
-
 
     case doReset:
       helperReset();
@@ -764,18 +682,31 @@ void loop() {
         T_println("Start OTA");
       }
 
-      /*
-        if (Keyboard.inputString.equals("S")) {
+
+      if (Keyboard.inputString.equals("S")) {
         sleepOk = !sleepOk;
         DV_println(sleepOk);
-        }
-        if (Keyboard.inputString.equals(F("RAZCONF"))) {
+      }
+      if (Keyboard.inputString.equals(F("RAZCONF"))) {
         Serial.println(F("RAZCONF this will reset"));
         eraseConfig();
         delay(1000);
-        Events.reset();
-        }
-      */
+        helperReset();
+      }
+      if (Keyboard.inputString.equals(F("HIST"))) {
+        DT_println("HIST");
+
+        printHisto();
+      }
+      if (Keyboard.inputString.equals(F("CONF"))) {
+        jobShowConfig(true);
+      }
+      if (Keyboard.inputString.equals(F("CONFSHOW"))) {
+        jobShowConfig(true);
+      }
+      if (Keyboard.inputString.equals(F("ERASEHISTO"))) {
+        eraseHisto();
+      }
   }
 }
 
