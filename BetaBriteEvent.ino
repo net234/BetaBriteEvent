@@ -480,7 +480,6 @@ void loop() {
           if (tempCnt > 1) aMessage += 's';
           aMessage += ' ';
           aMessage += temperatures;
-          
         }
         if (displayText.length()) {
           aMessage += F("\x1c"
@@ -706,6 +705,13 @@ void loop() {
       }
       if (Keyboard.inputString.equals(F("ERASEHISTO"))) {
         eraseHisto();
+      }
+      if (Keyboard.inputString.startsWith(F("SETAPI="))) {
+        Serial.println(F("SETUP api key : 'SETAPI=api uri (api.frdev.com)'"));
+        String aStr = Keyboard.inputString;
+        grabFromStringUntil(aStr, '=');
+        aStr.trim();
+        jobSetConfigStr(F("API"), aStr);
       }
   }
 }
