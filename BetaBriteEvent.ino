@@ -33,14 +33,15 @@
    V1.3  (16/02/2024)
     V2.0  (19/05/2024)
     -passage en mode bNode V2.0
-
+     V2.1  (26/05/2024)
+    - envois des donnees bNode vers un broker MQTT (PicoMQTT)
 *************************************************/
 
 // Definition des constantes pour les IO
 #include "ESP8266.h"
 //static_assert(sizeof(time_t) == 8, "This version works with time_t 64bit  move to ESP8266 kernel 3.0 or more");
 
-#define APP_NAME "BetaBriteEvent V2.0"
+#define APP_NAME "BetaBriteEvent V2.1"
 
 
 //
@@ -72,12 +73,13 @@ enum tUserEventCode {
   evEraseUdp,
   evLcdRefresh,
   evHttp,  //demande d'api local
+  evMqtt,
   // evenement action
   doReset,
 };
 
-#define checkWWW_DELAY (15 * 60 * 1000L)  // toute les 15 minutes
-#define checkAPI_DELAY (5 * 60 * 1000L)   // toute les 5 minutes
+#define checkWWW_DELAY (5 * 60 * 1000L)  // toute les 5 minutes
+#define checkAPI_DELAY (2 * 60 * 1000L)  // toute les 2 minutes
 
 //#define HTTP_API "http://nimux.frdev.com/net234/api.php"  // URI du serveur api local
 
@@ -102,6 +104,9 @@ enum tUserEventCode {
 #include "ESP8266.H"  // assignation des pin a l'aide constant #define type XXXXXX_PIN
 #include <bHub.h>
 
+// gestionaire MQTT
+#include "evHandlerMqtt.h"
+evHandlerMqtt MQTT(evMqtt, "mqtt.beta");
 
 
 
@@ -300,7 +305,7 @@ void loop() {
       }
 
       break;
-    /*
+      /*
         case evUdp:
           {
             if (Events.ext == evxUdpRxMessage) {
@@ -389,6 +394,122 @@ void loop() {
           }
           break;
     */
+    case evUdp:
+      if (Events.ext == evxUdpRxMessage) {
+        DTV_print("from", bHubUdp.rxFrom);
+        DTV_println("got an Event UDP (2)", bHubUdp.rxJson);
+        JSONVar rxJson = JSON.parse(bHubUdp.rxJson);
+
+        //11:28:34.247 -> "UDP" => 'BetaporteHall', "DATA" => '{"action":"porte","close":true}'
+        //11:28:11.712 -> "UDP" => 'BetaporteHall', "DATA" => '{"action":"porte","close":false}'
+        //11:28:02.677 -> "UDP" => 'bNode03', "DATA" => '{"temperature":{"hallFond":12.06}}'
+        //11:27:49.495 -> "UDP" => 'BetaporteHall', "DATA" => '{"action":"badge","userid":"Pierre H."}'
+        //11:27:00.218 -> "UDP" => 'bLed256B', "DATA" => '{"event":"evMasterSyncr"}'
+        // Received from BetaporteHall (10.11.12.52) TRAME1 245 : {"action":"badge","userid":"Pierre H."} Got 1 trames !!!
+        // Received from BetaporteHall (10.11.12.52) TRAME1 246 : {"action":"porte","close":false}
+
+
+        /*
+        //CMD
+        //./bNodeCmd.pl bNode FREE -n
+        //bNodeCmd.pl  V1.4
+        //broadcast:BETA82	net234	{"CMD":{"bNode":"FREE"}}
+        rxJson2 = rxJson["CMD"];
+        if (JSON.typeof(rxJson2).equals("object")) {
+          String dest = rxJson2.keys()[0];  //<nodename called>
+          // Les CMD acceptée doivent etre adressé a ce module
+          if (dest.equals("ALL") or (dest.length() > 3 and nodeName.startsWith(dest))) {
+            String aCmd = rxJson2[dest];
+            aCmd.trim();
+            DV_println(aCmd);
+            if (aCmd.startsWith("NODE=") and !nodeName.equals(dest)) break;  // NODE= not allowed on aliases
+            if (aCmd.length()) Keyboard.setInputString(aCmd);
+          } else {
+            DTV_println("CMD not for me.", dest);
+          }
+          break;
+        }
+
+        */
+
+        // temperature
+        JSONVar rxJson2 = rxJson["temperature"];
+        if (JSON.typeof(rxJson2).equals("object")) {
+          String aName = rxJson2.keys()[0];
+          //DV_println(aName);
+          double aValue = rxJson2[aName];
+          //DV_println(aValue);
+          //bHub.meshDevices[bHubUdp.rxFrom]["temperature"][aName] = aValue;
+          DTV_println("grab temperature", aValue);
+
+          MQTT.publish("beta/temperature/" + aName, String(aValue));
+          break;
+        }
+
+        //{"switch":{"FLASH":0}}
+        // temperature
+        rxJson2 = rxJson["switch"];
+        if (JSON.typeof(rxJson2).equals("object")) {
+          String aName = rxJson2.keys()[0];
+          //DV_println(aName);
+          double aValue = rxJson2[aName];
+          //DV_println(aValue);
+          bHub.meshDevices[bHubUdp.rxFrom]["switch"][aName] = aValue;
+          DTV_println("grab switch", aValue);
+          MQTT.publish("beta/temperature/" + aName, String(aValue));
+          break;
+        }
+
+        String action = (const char*)rxJson["action"];
+        DV_println(action);
+        if (action.equals(F("badge"))) {
+          //eceived packet UDPmyUdp.rxHeader => 'EVENT', myUdp.rxNode => 'Betaporte_2B', myUdp.rxJson => '{"action":"badge","userid":"Test_5"}'
+          String aStr = F("beta/badge/");
+          aStr += bHubUdp.rxFrom;
+          //aStr += "/badge";
+          MQTT.publish(aStr, rxJson["userid"]);
+          aStr = bHubUdp.rxFrom;
+
+          aStr += " : ";
+          aStr += (const char*)rxJson["userid"];  //
+          DV_println(aStr);
+
+          if (messageUDP.indexOf(aStr) < 0) {
+            messageUDP += "    ";
+            messageUDP += aStr;
+          }
+          Events.delayedPushMillis(500, evNewStatus);
+          Events.delayedPushMillis(5 * 60 * 1000, evEraseUdp);
+          return;
+        }
+
+
+
+        if (action.equals(F("porte"))) {
+          //Received packet UDPmyUdp.bcast => '1', myUdp.rxHeader => 'EVENT', myUdp.rxNode => 'Betaporte_2', myUdp.rxJson => '{"action":"porte","close":false}'
+          bool closed = (bool)rxJson["close"];
+          String aStr = F("beta/porte/");
+          aStr += bHubUdp.rxFrom;
+          //aStr += "/etat/";
+          MQTT.publish(aStr,  (closed)?"close":"open");
+           aStr = bHubUdp.rxFrom + ' ';
+          if (closed) {
+            openDoors.replace(aStr, "");
+            //openDoors.trim();
+          } else {
+            if (openDoors.indexOf(aStr) < 0) {
+
+              openDoors += aStr;
+            }
+          }
+
+          Events.delayedPushMillis(500, evNewStatus);
+          //Events.delayedPushMilli(3 * 60 * 1000, evEraseUdp);
+          return;
+        }
+      }
+      break;
+
 
     /*
       1CH+“1”(31H)=Red
@@ -492,6 +613,7 @@ void loop() {
         if (postInit) {
           betaBriteWrite(aMessage);
           if (bHub.connected) bHubUdp.broadcastInfo(F("TXT=") + lcdMessage);
+          MQTT.publish("beta/domo/message", lcdMessage);
         }
         if (lcdOk) Events.delayedPushMillis(300, evLcdRefresh, 0);
       }
