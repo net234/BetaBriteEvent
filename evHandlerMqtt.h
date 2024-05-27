@@ -82,14 +82,16 @@ enum tevMqtt : uint8_t { evxMqReceve,
 
 class evHandlerMqtt : private evHandler {
 public:
-  evHandlerMqtt(const uint8_t evCode,const String& broker)
+  evHandlerMqtt(const uint8_t evCode,const String& broker = "",const String& topicPrefix = "")
     : evCode(evCode), broker(broker){};
 
   virtual void begin() override;
   virtual void handle() override;
 
   bool publish(const String &topic, const String &payload);
+  void setBroker(const String& aBroker,const String& aTopicPrefix) {broker=aBroker;topicPrefix=aTopicPrefix+'/';begin();};
 private:
   uint8_t evCode;
   String broker;
+  String topicPrefix;
 };

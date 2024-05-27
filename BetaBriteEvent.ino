@@ -35,13 +35,13 @@
     -passage en mode bNode V2.0
      V2.1  (26/05/2024)
     - envois des donnees bNode vers un broker MQTT (PicoMQTT)
+    - add  broker in conf (mqtt.beta as default)
 *************************************************/
 
 // Definition des constantes pour les IO
 #include "ESP8266.h"
-//static_assert(sizeof(time_t) == 8, "This version works with time_t 64bit  move to ESP8266 kernel 3.0 or more");
 
-#define APP_NAME "BetaBriteEvent V2.1"
+#define APP_NAME "BetaBriteEvent V2.1A"
 
 
 //
@@ -106,7 +106,8 @@ enum tUserEventCode {
 
 // gestionaire MQTT
 #include "evHandlerMqtt.h"
-evHandlerMqtt MQTT(evMqtt, "mqtt.beta");
+evHandlerMqtt MQTT(evMqtt);
+
 
 
 
@@ -148,7 +149,13 @@ bool lcdOk = false;
 
 void setup() {
   Events.begin();
+ 
+
+
   Serial.println(F("\r\n\n" APP_NAME));
+
+   // setup broker with config data
+  MQTT.setBroker(jobGetConfigStr("broker"), jobGetConfigStr("mqttprefix")); 
 
   Serial1.begin(2400, SERIAL_7E1);  // afficheur betabrite sur serial1 TX (D4)
 
@@ -442,12 +449,12 @@ void loop() {
           //bHub.meshDevices[bHubUdp.rxFrom]["temperature"][aName] = aValue;
           DTV_println("grab temperature", aValue);
 
-          MQTT.publish("beta/temperature/" + aName, String(aValue));
+          MQTT.publish("temperature/" + aName, String(aValue));
           break;
         }
 
         //{"switch":{"FLASH":0}}
-        // temperature
+        // switch
         rxJson2 = rxJson["switch"];
         if (JSON.typeof(rxJson2).equals("object")) {
           String aName = rxJson2.keys()[0];
@@ -456,15 +463,29 @@ void loop() {
           //DV_println(aValue);
           bHub.meshDevices[bHubUdp.rxFrom]["switch"][aName] = aValue;
           DTV_println("grab switch", aValue);
-          MQTT.publish("beta/temperature/" + aName, String(aValue));
+          MQTT.publish("switch/" + aName, String(aValue));
           break;
         }
+ // relay
+        rxJson2 = rxJson["relay"];
+        if (JSON.typeof(rxJson2).equals("object")) {
+          String aName = rxJson2.keys()[0];
+          //DV_println(aName);
+          double aValue = rxJson2[aName];
+          //DV_println(aValue);
+          bHub.meshDevices[bHubUdp.rxFrom]["relay"][aName] = aValue;
+          DTV_println("grab relay", aValue);
+          MQTT.publish("relay/" + aName, String(aValue));
+          break;
+        }
+// ancienne trame genere par les betaporte 
+// TODO: a modifier comme les relay 
 
         String action = (const char*)rxJson["action"];
         DV_println(action);
         if (action.equals(F("badge"))) {
           //eceived packet UDPmyUdp.rxHeader => 'EVENT', myUdp.rxNode => 'Betaporte_2B', myUdp.rxJson => '{"action":"badge","userid":"Test_5"}'
-          String aStr = F("beta/badge/");
+          String aStr = F("badge/");
           aStr += bHubUdp.rxFrom;
           //aStr += "/badge";
           MQTT.publish(aStr, rxJson["userid"]);
@@ -482,17 +503,18 @@ void loop() {
           Events.delayedPushMillis(5 * 60 * 1000, evEraseUdp);
           return;
         }
-
+// ancienne trame genere par les betaporte 
+// TODO: a modifier comme les relay 
 
 
         if (action.equals(F("porte"))) {
           //Received packet UDPmyUdp.bcast => '1', myUdp.rxHeader => 'EVENT', myUdp.rxNode => 'Betaporte_2', myUdp.rxJson => '{"action":"porte","close":false}'
           bool closed = (bool)rxJson["close"];
-          String aStr = F("beta/porte/");
+          String aStr = F("porte/");
           aStr += bHubUdp.rxFrom;
           //aStr += "/etat/";
-          MQTT.publish(aStr,  (closed)?"close":"open");
-           aStr = bHubUdp.rxFrom + ' ';
+          MQTT.publish(aStr, (closed) ? "close" : "open");
+          aStr = bHubUdp.rxFrom + ' ';
           if (closed) {
             openDoors.replace(aStr, "");
             //openDoors.trim();
@@ -613,7 +635,7 @@ void loop() {
         if (postInit) {
           betaBriteWrite(aMessage);
           if (bHub.connected) bHubUdp.broadcastInfo(F("TXT=") + lcdMessage);
-          MQTT.publish("beta/domo/message", lcdMessage);
+          MQTT.publish("domo/message", lcdMessage);
         }
         if (lcdOk) Events.delayedPushMillis(300, evLcdRefresh, 0);
       }
@@ -834,6 +856,19 @@ void loop() {
         grabFromStringUntil(aStr, '=');
         aStr.trim();
         jobSetConfigStr(F("API"), aStr);
+      }
+      if (Keyboard.inputString.startsWith(F("SETBROKER="))) {
+        Serial.println(F("SETUP api key : 'SETBROKER=broker uri (mqtt.local),mqtt prefix'"));
+        String aStr = Keyboard.inputString;
+        grabFromStringUntil(aStr, '=');
+        // get broker
+        String bStr = grabFromStringUntil(aStr, ',');
+        bStr.trim();
+        jobSetConfigStr(F("broker"), bStr);
+        //get prefix
+        aStr.trim();
+        jobSetConfigStr(F("mqttprefix"), aStr);
+        MQTT.setBroker(bStr,aStr);
       }
   }
 }
