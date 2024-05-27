@@ -41,7 +41,7 @@
 // Definition des constantes pour les IO
 #include "ESP8266.h"
 
-#define APP_NAME "BetaBriteEvent V2.1A"
+#define APP_NAME "BetaBriteEvent V2.1B"
 
 
 //
@@ -149,13 +149,13 @@ bool lcdOk = false;
 
 void setup() {
   Events.begin();
- 
+
 
 
   Serial.println(F("\r\n\n" APP_NAME));
 
-   // setup broker with config data
-  MQTT.setBroker(jobGetConfigStr("broker"), jobGetConfigStr("mqttprefix")); 
+  // setup broker with config data
+  MQTT.setBroker(jobGetConfigStr("broker"), jobGetConfigStr("mqttprefix"));
 
   Serial1.begin(2400, SERIAL_7E1);  // afficheur betabrite sur serial1 TX (D4)
 
@@ -466,7 +466,7 @@ void loop() {
           MQTT.publish("switch/" + aName, String(aValue));
           break;
         }
- // relay
+        // relay
         rxJson2 = rxJson["relay"];
         if (JSON.typeof(rxJson2).equals("object")) {
           String aName = rxJson2.keys()[0];
@@ -478,8 +478,8 @@ void loop() {
           MQTT.publish("relay/" + aName, String(aValue));
           break;
         }
-// ancienne trame genere par les betaporte 
-// TODO: a modifier comme les relay 
+        // ancienne trame genere par les betaporte
+        // TODO: a modifier comme les relay
 
         String action = (const char*)rxJson["action"];
         DV_println(action);
@@ -503,8 +503,8 @@ void loop() {
           Events.delayedPushMillis(5 * 60 * 1000, evEraseUdp);
           return;
         }
-// ancienne trame genere par les betaporte 
-// TODO: a modifier comme les relay 
+        // ancienne trame genere par les betaporte
+        // TODO: a modifier comme les relay
 
 
         if (action.equals(F("porte"))) {
@@ -679,6 +679,9 @@ void loop() {
           DV_println(WWWOk);
           writeHisto(WWWOk ? F("WWW Ok") : F("WWW Err"), "checkFAI");
           jobUpdateLed0();
+          jobBcastSwitch("www", WWWOk);
+          bHub.localDevices["switch"]["www"] = WWWOk;
+          MQTT.publish("switch/www", String(WWWOk));
           if (WWWOk and postInit) {
             Serial.println("send a mail");
             bool sendOk = sendHistoTo(mailSendTo);
@@ -708,6 +711,9 @@ void loop() {
           APIOk = !APIOk;
           DV_println(APIOk);
           writeHisto(APIOk ? F("API Ok") : F("API Err"), jobGetConfigStr("API"));
+          jobBcastSwitch("api", APIOk);
+          bHub.localDevices["switch"]["api"] = APIOk;
+          MQTT.publish("switch/api", String(APIOk));
           jobUpdateLed0();
         }
         if (APIOk) {
@@ -842,7 +848,7 @@ void loop() {
         printHisto();
       }
       if (Keyboard.inputString.equals(F("CONF"))) {
-        jobShowConfig(true);
+        jobShowConfig(false);
       }
       if (Keyboard.inputString.equals(F("CONFSHOW"))) {
         jobShowConfig(true);
@@ -868,7 +874,7 @@ void loop() {
         //get prefix
         aStr.trim();
         jobSetConfigStr(F("mqttprefix"), aStr);
-        MQTT.setBroker(bStr,aStr);
+        MQTT.setBroker(bStr, aStr);
       }
   }
 }
