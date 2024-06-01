@@ -210,6 +210,16 @@ void jobBcastSwitch(const String& aName, const int aValue) {
   DTV_println("BroadCast", aTxt);
   bHubUdp.broadcast(aTxt);
 }
+
+void jobBcastCmd(const String& aDest, const String& aCmd) {
+  String aTxt = "{\"CMD\":{\"";
+  aTxt += aDest;
+  aTxt += "\":\"";
+  aTxt += aCmd;
+  aTxt += "\"}}";
+  DTV_println("BroadCast", aTxt);
+  bHubUdp.broadcast(aTxt);
+}
 /*
 // 100 HZ
 void jobRefreshLeds(const uint8_t delta) {

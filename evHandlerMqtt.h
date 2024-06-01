@@ -72,7 +72,7 @@
 
 
 
-enum tevMqtt : uint8_t { evxMqReceve,
+enum tevMqtt : uint8_t { evxMqReceved,
                          evxMqError };
 
 #include <EventsManagerESP.h>
@@ -82,16 +82,23 @@ enum tevMqtt : uint8_t { evxMqReceve,
 
 class evHandlerMqtt : private evHandler {
 public:
-  evHandlerMqtt(const uint8_t evCode,const String& broker = "",const String& topicPrefix = "")
+  evHandlerMqtt(const uint8_t evCode, const String& broker = "", const String& topicPrefix = "")
     : evCode(evCode), broker(broker){};
 
   virtual void begin() override;
   virtual void handle() override;
 
-  bool publish(const String &topic, const String &payload);
-  void setBroker(const String& aBroker,const String& aTopicPrefix) {broker=aBroker;topicPrefix=aTopicPrefix+'/';begin();};
+  bool publish(const String& topic, const String& payload);
+  void setBroker(const String& aBroker, const String& aTopicPrefix) {
+    broker = aBroker;
+    topicPrefix = aTopicPrefix + '/';
+    begin();
+  };
 private:
+  //static void onPublish(const char* topic, const char* payload);
   uint8_t evCode;
+  //static String recevedTopic;
+  //static String recevedPayload;
   String broker;
   String topicPrefix;
 };

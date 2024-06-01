@@ -41,7 +41,7 @@
 // Definition des constantes pour les IO
 #include "ESP8266.h"
 
-#define APP_NAME "BetaBriteEvent V2.1B"
+#define APP_NAME "BetaBriteEvent V2.1C"
 
 
 //
@@ -144,22 +144,26 @@ String mailSendTo;
 
 bool lcdOk = false;
 
+String recevedPayload;
+String recevedTopic;
 
 
+void onMqttReceve(const char *topic, const char *payload) {
+  DTV_print("MQTT: received", topic);
+  DV_println(payload);
+  if (payload[0] == 0) {
+    recevedPayload = payload;
+    recevedTopic = topic;
+    Events.push(evMqtt, evxMqReceved);
+  }
+}
 
 void setup() {
   Events.begin();
 
-
-
   Serial.println(F("\r\n\n" APP_NAME));
 
-  // setup broker with config data
-  MQTT.setBroker(jobGetConfigStr("broker"), jobGetConfigStr("mqttprefix"));
-
   Serial1.begin(2400, SERIAL_7E1);  // afficheur betabrite sur serial1 TX (D4)
-
-
 
   //  message.reserve(200);
   messageUDP.reserve(100);
@@ -193,8 +197,13 @@ void setup() {
   }
   DV_println(bHub.timeZone);
 
+
   //Init I2C
   Wire.begin(I2C_SDA, I2C_SCL);
+  // setup broker with config data
+  recevedPayload.reserve(200);
+  recevedTopic.reserve(800);
+  MQTT.setBroker(jobGetConfigStr("broker"), jobGetConfigStr("mqttprefix"));
 
   //  Check LCD
   if (!checkI2C(LCD_I2CADR)) {
@@ -212,9 +221,6 @@ void setup() {
   lcd.setBacklight(100);
   lcd.println(F(APP_NAME));
   lcd.println(F("Bonjour"));
-
-
-
 
   String message = F("Bonjour ...   ");
   message += niceDisplayTime(bHub.currentTime, true);
@@ -312,6 +318,43 @@ void loop() {
       }
 
       break;
+    case evMqtt:
+      {
+        switch (Events.ext) {
+          case evxMqReceved:
+            {
+              DT_print("evxMQreceved");
+              DV_print(recevedPayload);
+              DV_println(recevedTopic);
+              String aStr = recevedTopic;
+              grabFromStringUntil(aStr, '/');  //should be nodeName
+              String aDeviceType = grabFromStringUntil(aStr, '/');
+              String aDeviceName = grabFromStringUntil(aStr, '/');
+              //detection d'un QUERY
+              if (not aStr.equals("?")) break;
+              DV_println(aDeviceName);
+
+              aStr = "QUERY=";
+              aStr += aDeviceType;
+              aStr += ',';
+              aStr += aDeviceName;
+              //check localDevices
+              if (bHub.localDevices.hasOwnProperty(aDeviceType) and bHub.localDevices[aDeviceType].hasOwnProperty(aDeviceName)) {
+                Keyboard.setInputString(aStr);
+              }
+              //Check meshDevices
+              JSONVar keys = bHub.meshDevices.keys();
+              for (int i = 0; i < keys.length(); i++) {
+                String aKey = keys[i];
+                if (bHub.meshDevices[aKey].hasOwnProperty(aDeviceType) and bHub.meshDevices[aKey][aDeviceType].hasOwnProperty(aDeviceName)) {
+                  jobBcastCmd(aKey, aStr);
+                }
+              }
+            }
+            break;
+        }
+        break;
+      }
       /*
         case evUdp:
           {
@@ -403,8 +446,8 @@ void loop() {
     */
     case evUdp:
       if (Events.ext == evxUdpRxMessage) {
-        DTV_print("from", bHubUdp.rxFrom);
-        DTV_println("got an Event UDP (2)", bHubUdp.rxJson);
+        //DTV_print("from", bHubUdp.rxFrom);
+        //DTV_println("got an Event UDP (2)", bHubUdp.rxJson);
         JSONVar rxJson = JSON.parse(bHubUdp.rxJson);
 
         //11:28:34.247 -> "UDP" => 'BetaporteHall', "DATA" => '{"action":"porte","close":true}'
@@ -481,8 +524,10 @@ void loop() {
         // ancienne trame genere par les betaporte
         // TODO: a modifier comme les relay
 
-        String action = (const char*)rxJson["action"];
-        DV_println(action);
+        String action = (const char *)rxJson["action"];
+        if (action.length()) {
+          TV_println("old action", action);
+        }
         if (action.equals(F("badge"))) {
           //eceived packet UDPmyUdp.rxHeader => 'EVENT', myUdp.rxNode => 'Betaporte_2B', myUdp.rxJson => '{"action":"badge","userid":"Test_5"}'
           String aStr = F("badge/");
@@ -492,7 +537,7 @@ void loop() {
           aStr = bHubUdp.rxFrom;
 
           aStr += " : ";
-          aStr += (const char*)rxJson["userid"];  //
+          aStr += (const char *)rxJson["userid"];  //
           DV_println(aStr);
 
           if (messageUDP.indexOf(aStr) < 0) {
@@ -604,7 +649,7 @@ void loop() {
         JSONVar key0 = bHub.meshDevices.keys();
         for (int i = 0; i < key0.length(); i++) {
           String aKey0 = key0[i];
-          DV_println(aKey0);
+          //DV_println(aKey0);
           JSONVar aJson = bHub.meshDevices[aKey0]["temperature"];
           JSONVar keys = aJson.keys();
           for (int i = 0; i < keys.length(); i++) {
@@ -762,6 +807,28 @@ void loop() {
     case evInString:
       if (Debug.trackTime < 2) {
         DV_println(Keyboard.inputString);
+      }
+
+
+      if (Keyboard.inputString.startsWith(F("QUERY="))) {
+        String aStr = Keyboard.inputString;
+        grabFromStringUntil(aStr, '=');
+        String aDevType = grabFromStringUntil(aStr, ',');
+        aDevType.trim();
+        aStr.trim();
+        if (aDevType.length() and aStr.length()) {
+          if (bHub.localDevices.hasOwnProperty(aDevType) and bHub.localDevices[aDevType].hasOwnProperty(aStr)) {
+            String aTopic = aDevType;
+            aTopic += '/';
+            aTopic += aStr;
+            aTopic += '/';
+            aTopic += "info";
+            String aPayLoad = "{\"URL\":\"http://";
+            aPayLoad += bHub.nodeName;
+            aPayLoad += ".local/api.json\"}";
+            MQTT.publish(aTopic, aPayLoad);
+          }
+        }
       }
 
       if (Keyboard.inputString.startsWith(F("NODE="))) {

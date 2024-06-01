@@ -41,12 +41,22 @@ String anyTopic = "#";
 //   Serial << "--> Client A received msg on topic " << topic.c_str() << ", " << payload << ", " << srce->id() << endl;
 //   //}
 // }
+/*
+static String recevedTopic;
+static String recevedPayload;
+
 
 void onPublish(const char *topic, const char *payload) {
   TV_print("MQTT: received", topic);
   V_println(payload);
+  if (strcmp("?", payload)) {
+    recevedPayload = String(payload);
+    recevedTopic = String(topic);
+    Events.push(evCode, evxMqReceved);
+  }
 }
-
+*/
+void onMqttReceve(const char *topic, const char *payload);
 
 void evHandlerMqtt::begin() {
   if (!broker.length()) return;
@@ -61,12 +71,13 @@ void evHandlerMqtt::begin() {
   Serial.print("Broker ready  with ");
   Serial.println(broker);
   // Subscribe to a topic and attach a callback
-  mqtt.subscribe(topicPrefix+'#',onPublish);
+  mqtt.subscribe(topicPrefix + '#', onMqttReceve);
   // mqtt.subscribe("#", [](const char *topic, const char *payload) {
   //   // payload might be binary, but PicoMQTT guarantees that it's zero-terminated
   //   Serial.printf("MQTT:Received message in topic '%s': %s\n", topic, payload);
   // });
-
+  //recevedTopic.reserve(200);    //MAX 256
+  //recevedPayload.reserve(800);  //MAX 1024
   mqtt.begin();
 };
 
@@ -78,11 +89,11 @@ bool evHandlerMqtt::publish(const String &topic, const String &payload) {
   String aStr = topicPrefix;
   aStr += topic;
   bool result = mqtt.publish(aStr.c_str(), payload.c_str());
-#ifndef NO_DEBUG
+  //#ifndef NO_DEBUG
   aStr += ':';
   aStr += payload;
-  DTV_println("MQTT: Sending MQTT ", aStr);
-  if (!result) DT_println("MQTT: erreur");
-#endif
+  TV_println("MQTT: Sending MQTT ", aStr);
+  if (!result) T_println("MQTT: erreur");
+  //#endif
   return (result);
 }
