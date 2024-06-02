@@ -151,11 +151,14 @@ String recevedTopic;
 void onMqttReceve(const char *topic, const char *payload) {
   DTV_print("MQTT: received", topic);
   DV_println(payload);
-  if (payload[0] == 0) {
-    recevedPayload = payload;
-    recevedTopic = topic;
-    Events.push(evMqtt, evxMqReceved);
-  }
+  // sont accepté que les topic  de plus de 8 caracters terminé par "/?" ou "/CMD"
+  int topicLen = strlen(topic);
+  if (topicLen < 8) return;
+  if (strcmp(topic + topicLen - 2, "/?") != 0 and strcmp(topic + topicLen - 4, "/CMD") != 0) return;
+
+  recevedPayload = payload;
+  recevedTopic = topic;
+  Events.push(evMqtt, evxMqReceved);
 }
 
 void setup() {
@@ -327,27 +330,33 @@ void loop() {
               DV_print(recevedPayload);
               DV_println(recevedTopic);
               String aStr = recevedTopic;
-              grabFromStringUntil(aStr, '/');  //should be nodeName
+              grabFromStringUntil(aStr, '/');  //should be subscribe prefix
               String aDeviceType = grabFromStringUntil(aStr, '/');
               String aDeviceName = grabFromStringUntil(aStr, '/');
               //detection d'un QUERY
-              if (not aStr.equals("?")) break;
+              if (aStr.equals("?") and recevedPayload.length() == 0) {
+                recevedPayload = "QUERY=";
+                recevedPayload += aDeviceType;
+                recevedPayload += ',';
+                recevedPayload += aDeviceName;
+                aStr="CMD";
+              }
+
+
+              if (not aStr.equals("CMD")) break;
               DV_println(aDeviceName);
 
-              aStr = "QUERY=";
-              aStr += aDeviceType;
-              aStr += ',';
-              aStr += aDeviceName;
+
               //check localDevices
               if (bHub.localDevices.hasOwnProperty(aDeviceType) and bHub.localDevices[aDeviceType].hasOwnProperty(aDeviceName)) {
-                Keyboard.setInputString(aStr);
+                Keyboard.setInputString(recevedPayload);
               }
               //Check meshDevices
               JSONVar keys = bHub.meshDevices.keys();
               for (int i = 0; i < keys.length(); i++) {
                 String aKey = keys[i];
                 if (bHub.meshDevices[aKey].hasOwnProperty(aDeviceType) and bHub.meshDevices[aKey][aDeviceType].hasOwnProperty(aDeviceName)) {
-                  jobBcastCmd(aKey, aStr);
+                  jobBcastCmd(aKey, recevedPayload);
                 }
               }
             }
@@ -446,10 +455,9 @@ void loop() {
     */
     case evUdp:
       if (Events.ext == evxUdpRxMessage) {
-        //DTV_print("from", bHubUdp.rxFrom);
-        //DTV_println("got an Event UDP (2)", bHubUdp.rxJson);
+        DTV_print("from", bHubUdp.rxFrom);
+        DTV_println("got an Event UDP (2)", bHubUdp.rxJson);
         JSONVar rxJson = JSON.parse(bHubUdp.rxJson);
-
         //11:28:34.247 -> "UDP" => 'BetaporteHall', "DATA" => '{"action":"porte","close":true}'
         //11:28:11.712 -> "UDP" => 'BetaporteHall', "DATA" => '{"action":"porte","close":false}'
         //11:28:02.677 -> "UDP" => 'bNode03', "DATA" => '{"temperature":{"hallFond":12.06}}'
@@ -496,7 +504,7 @@ void loop() {
           break;
         }
 
-        //{"switch":{"FLASH":0}}
+        //{"switch":{"FLASH":0}}1111
         // switch
         rxJson2 = rxJson["switch"];
         if (JSON.typeof(rxJson2).equals("object")) {
@@ -521,6 +529,21 @@ void loop() {
           MQTT.publish("relay/" + aName, String(aValue));
           break;
         }
+
+        //  info temp relay swithc
+        String aTopic = rxJson.keys()[0];
+        DV_print(aTopic);
+        String aPayLoad = JSON.stringify(rxJson[aTopic]);
+        DV_println(aPayLoad);
+
+        if (aTopic.startsWith("temperature") or aTopic.startsWith("switch") or aTopic.startsWith("relay")) {
+          DTV_print("grab TP mode", aTopic);
+          DV_println(aPayLoad);
+          MQTT.publish(aTopic, aPayLoad);
+          break;
+        }
+
+
         // ancienne trame genere par les betaporte
         // TODO: a modifier comme les relay
 
@@ -810,26 +833,7 @@ void loop() {
       }
 
 
-      if (Keyboard.inputString.startsWith(F("QUERY="))) {
-        String aStr = Keyboard.inputString;
-        grabFromStringUntil(aStr, '=');
-        String aDevType = grabFromStringUntil(aStr, ',');
-        aDevType.trim();
-        aStr.trim();
-        if (aDevType.length() and aStr.length()) {
-          if (bHub.localDevices.hasOwnProperty(aDevType) and bHub.localDevices[aDevType].hasOwnProperty(aStr)) {
-            String aTopic = aDevType;
-            aTopic += '/';
-            aTopic += aStr;
-            aTopic += '/';
-            aTopic += "info";
-            String aPayLoad = "{\"URL\":\"http://";
-            aPayLoad += bHub.nodeName;
-            aPayLoad += ".local/api.json\"}";
-            MQTT.publish(aTopic, aPayLoad);
-          }
-        }
-      }
+
 
       if (Keyboard.inputString.startsWith(F("NODE="))) {
         Serial.println(F("SETUP NODENAME : 'NODE=nodename'  ( this will reset)"));
